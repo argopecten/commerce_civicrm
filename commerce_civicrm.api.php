@@ -1,88 +1,83 @@
 <?php
-
-
-/*
- * $civicrm_address = array(
-    1 => array(
-      'location_type_id'       => 1,
-      'is_primary'             => TRUE,
-      'city'                   => $address['locality'],
-      'state_province'         => $address['administrative_area'],
-      'postal_code'            => $address['postal_code'],
-      'street_address'         => $address['thoroughfare'],
-      'supplemental_address_1' => $address['premise'],
-      'country'                => $address['country']
-    )
-  );
- */
+<?php
 
 /**
- * Implements hook_commerce_civicrm_params().
+ * Example: Alter CiviCRM contact params before sending to CiviCRM.
  *
- * @param $params
- *   civicrm_location_update params array.
- * @param $order
- *   Commerce order object.
- * @param $cid
- *   CiviCRM contact id.
+ * @param array $params
+ *   CiviCRM contact update params array (by reference).
+ * @param \Drupal\commerce_order\Entity\OrderInterface $order
+ *   Commerce order entity.
+ * @param int $cid
+ *   CiviCRM contact ID.
  */
-function hook_commerce_civicrm_params(&$params, $order, $cid) {
-  // You can grab the profile of the customer like so.
-  $order_wrapper = entity_metadata_wrapper('commerce_order', $order);
-  $profile = $order_wrapper->commerce_customer_billing->value();
-  $profile_wrapper = entity_metadata_wrapper('commerce_customer_profile', $profile);
+function commerce_civicrm_example_alter_contact_params(array &$params, \Drupal\commerce_order\Entity\OrderInterface $order, $cid) {
+  // Get the billing profile from the order.
+  $profile = $order->getBillingProfile();
+  if (!$profile) {
+    return;
+  }
 
-  // Then alter $params as required to add any custom commerce fields to send to CiviCRM.
-  $params['job_title'] = $profile_wrapper->field_job_title->value();
-  $params['current_employer'] = $profile_wrapper->field_organisation->value();
-  $params['phone'] = array(
-    array(
-      'is_primary' => TRUE,
-      'phone' => $profile_wrapper->field_phone->value(),
-      'phone_type_id' => 1,
-      'location_type' => 'Home',
-    		'sequential' => 0
-    )
-  );
+  // Example: Add custom fields from the billing profile to CiviCRM params.
+  if ($profile->hasField('field_job_title')) {
+    $params['job_title'] = $profile->get('field_job_title')->value;
+  }
+  if ($profile->hasField('field_organisation')) {
+    $params['current_employer'] = $profile->get('field_organisation')->value;
+  }
+  if ($profile->hasField('field_phone')) {
+    $params['phone'] = [
+      [
+        'is_primary' => TRUE,
+        'phone' => $profile->get('field_phone')->value,
+        'phone_type_id' => 1,
+        'location_type' => 'Home',
+        'sequential' => 0,
+      ],
+    ];
+  }
 
-  // Update the contact, need this for details like employer, job title etc.
-  $params['id'] = $params['contact_id'];
-  $contact = civicrm_api('contact', 'update', $params);
-  // It would be good to make these mappable through a GUI.
+  // Update the contact in CiviCRM.
+  $params['id'] = $params['contact_id'] ?? $cid;
+  try {
+    civicrm_api3('Contact', 'create', $params);
+  }
+  catch (\Exception $e) {
+    \Drupal::logger('commerce_civicrm')->error('CiviCRM contact update failed: @message', ['@message' => $e->getMessage()]);
+  }
 }
-
 
 /**
- * Implements hook_commerce_civicrm_contribution_params().
+ * Example: Alter CiviCRM contribution params before sending to CiviCRM.
  *
- * @param $params
- *   civicrm_location_update params array.
- *   $params = array(
- *     'contact_id' => $cid,
- *     'receive_date' => date('Ymd'),
- *     'total_amount' => $order_total,
- *     'financial_type_id' => variable_get('commerce_civicrm_contribution_type', ''),
- *     'payment_instrument_id' => $payment_instrument_id,
- *     'non_deductible_amount' => 00.00,
- *     'fee_amount' => 00.00,
- *     'net_amount' => $order_total,
- *     'trxn_id' => $txn_id,
- *     'invoice_id' => $order->order_id . '_dc',
- *     'source' => $notes,
- *     'contribution_status_id' => _commerce_civicrm_map_contribution_status($order->status),
- *     'note' => $notes,
- *   );
- * 
- * @param $order
- *   Commerce order object.
- * @param $cid
- *   CiviCRM contact id.
- * @param $transaction
- *   Drupal commerce transaction object
+ * @param array $params
+ *   CiviCRM contribution params array (by reference).
+ * @param \Drupal\commerce_order\Entity\OrderInterface $order
+ *   Commerce order entity.
+ * @param int $cid
+ *   CiviCRM contact ID.
+ * @param \Drupal\commerce_payment\Entity\PaymentInterface|null $payment
+ *   Commerce payment entity (optional).
  */
-function hook_commerce_civicrm_contribution_params(&$params, $order, $cid, $transaction) {
-  // You can grab the order wrapper like so. 
-  $order_wrapper = entity_metadata_wrapper('commerce_order', $order);
-  // And then adjust the params as required.
-}
+function commerce_civicrm_example_alter_contribution_params(array &$params, \Drupal\commerce_order\Entity\OrderInterface $order, $cid, $payment = NULL) {
+  $params['contact_id'] = $cid;
+  $params['receive_date'] = date('Y-m-d');
+  $params['total_amount'] = $order->getTotalPrice()->getNumber();
+  $params['currency'] = $order->getTotalPrice()->getCurrencyCode();
+  $params['source'] = 'Drupal Commerce Order ' . $order->id();
+  $params['contribution_status_id'] = 'Completed';
 
+  // Add payment details if available.
+  if ($payment) {
+    $params['trxn_id'] = $payment->getRemoteId();
+    $params['payment_instrument_id'] = 1; // Adjust as needed.
+  }
+
+  // Example: Call CiviCRM API to create the contribution.
+  try {
+    civicrm_api3('Contribution', 'create', $params);
+  }
+  catch (\Exception $e) {
+    \Drupal::logger('commerce_civicrm')->error('CiviCRM contribution creation failed: @message', ['@message' => $e->getMessage()]);
+  }
+}
