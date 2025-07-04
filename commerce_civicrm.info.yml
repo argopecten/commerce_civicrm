@@ -1,0 +1,15 @@
+name: 'Commerce CiviCRM'
+type: module
+description: 'Integrates Drupal Commerce with CiviCRM, allowing products to be mapped to CiviCRM memberships or contributions.'
+package: Commerce
+core_version_requirement: ^10.3 || ^11
+dependencies:
+  - civicrm:civicrm
+  - drupal:commerce_product
+  - drupal:commerce_order
+  - drupal:commerce_payment
+  - drupal:user
+config:
+  install:
+    - views.view.commerce_civicrm_orders_by_user
+
