@@ -3,15 +3,16 @@
 /**
  * @file
  * Main module file for the Commerce CiviCRM module.
+ *
  * This file contains the primary hooks and logic for integrating
  * Drupal Commerce with CiviCRM.
  */
 
 use Drupal\Core\Routing\RouteMatchInterface;
-use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_product\Entity\ProductInterface;
 use Drupal\Core\Form\FormStateInterface;
-use Drupal\Core\Url;
+use Civi\Api4\MembershipType;
+use Civi\Api4\FinancialType;
 
 /**
  * Implements hook_help().
@@ -22,9 +23,9 @@ function commerce_civicrm_help($route_name, RouteMatchInterface $route_match) {
     case 'help.page.commerce_civicrm':
       $output = '';
       $output .= '<h3>' . t('About') . '</h3>';
-      $output .= '<p>' . t('The Commerce CiviCRM module integrates Drupal Commerce with CiviCRM. It allows you to associate Commerce products with CiviCRM memberships or contributions. When a customer purchases such a product, the corresponding membership or contribution is created or updated in CiviCRM.') . '</p>';
+      $output .= '<p>' . t('The Commerce CiviCRM module integrates Drupal Commerce with CiviCRM. It allows you to associate Commerce products with CiviCRM memberships or financial types (for contributions). When a customer purchases a product, the corresponding CiviCRM record is created.') . '</p>';
       $output .= '<h3>' . t('Configuration') . '</h3>';
-      $output .= '<p>' . t('To configure CiviCRM integration, edit a Commerce product and go to the "CiviCRM" tab. You can enable CiviCRM processing and map the product to a specific CiviCRM membership or contribution type.') . '</p>';
+      $output .= '<p>' . t('To configure the integration, you must first add a text field named `field_civicrm` to the commerce product types you wish to enable. Then, edit a Commerce product and go to the "CiviCRM Integration" section in the advanced settings.') . '</p>';
       return $output;
 
     default:
@@ -34,28 +35,27 @@ function commerce_civicrm_help($route_name, RouteMatchInterface $route_match) {
 /**
  * Implements hook_form_FORM_ID_alter() for commerce_product_form.
  *
- * Adds a CiviCRM tab to the product edit form.
- *
- * In Drupal 10/11, many form alterations remain similar, but it's crucial
- * to ensure all service injections and class references are up to date if this
- * were converted to a form class. For a simple hook, this structure is still valid.
+ * Adds a CiviCRM integration settings form to the product edit form.
  */
 function commerce_civicrm_form_commerce_product_form_alter(&$form, FormStateInterface $form_state, $form_id) {
   /** @var \Drupal\commerce_product\Entity\ProductInterface $product */
   $product = $form_state->getFormObject()->getEntity();
 
-  // Initialize CiviCRM if it hasn't been already.
-  // This is a safeguard. In a typical Drupal 11 environment, CiviCRM's
-  // services should be available if the CiviCRM module is enabled.
-  if (!class_exists('CRM_Core_Config')) {
-    \Drupal::service('civicrm')->initialize();
+  // Ensure the product has the required field before proceeding.
+  if (!$product->hasField('field_civicrm')) {
+    return;
   }
 
-  // Get CiviCRM settings for this product.
-  $civicrm_settings = $product->get('field_civicrm')->getValue();
-  $civicrm_enabled = !empty($civicrm_settings[0]['enabled']) ? $civicrm_settings[0]['enabled'] : 0;
-  $civicrm_entity = !empty($civicrm_settings[0]['entity']) ? $civicrm_settings[0]['entity'] : 'contribution';
-  $civicrm_entity_id = !empty($civicrm_settings[0]['entity_id']) ? $civicrm_settings[0]['entity_id'] : NULL;
+  // Initialize CiviCRM.
+  \Drupal::service('civicrm')->initialize();
+
+  // Get CiviCRM settings for this product. Use json_decode for safer data handling.
+  $civicrm_settings_raw = $product->get('field_civicrm')->value;
+  $civicrm_settings = !empty($civicrm_settings_raw) ? json_decode($civicrm_settings_raw, TRUE) : [];
+  
+  $civicrm_enabled = $civicrm_settings['enabled'] ?? 0;
+  $civicrm_entity = $civicrm_settings['entity'] ?? 'contribution';
+  $civicrm_entity_id = $civicrm_settings['entity_id'] ?? NULL;
 
   $form['civicrm'] = [
     '#type' => 'details',
@@ -63,6 +63,8 @@ function commerce_civicrm_form_commerce_product_form_alter(&$form, FormStateInte
     '#group' => 'advanced',
     '#weight' => 90,
     '#open' => TRUE,
+    // Add a check to ensure the field exists.
+    '#access' => $product->hasField('field_civicrm'),
   ];
 
   $form['civicrm']['enabled'] = [
@@ -86,27 +88,20 @@ function commerce_civicrm_form_commerce_product_form_alter(&$form, FormStateInte
     ],
   ];
 
-  // Fetch membership types for the dropdown.
-  // Using APIv4 is preferred in modern CiviCRM, but APIv3 is still widely used
-  // and functional in 6.3 for this purpose. An upgrade to APIv4 would be a
-  // good future improvement.
+  // Fetch membership types using APIv4.
+  $membership_options = [];
   try {
-    $membership_types = civicrm_api3('MembershipType', 'get', [
-      'sequential' => 1,
-      'is_active' => 1,
-      'options' => ['limit' => 0],
-    ]);
-    $membership_options = [];
-    if (!empty($membership_types['values'])) {
-      foreach ($membership_types['values'] as $type) {
-        $membership_options[$type['id']] = $type['name'];
-      }
+    $membership_types = MembershipType::get(FALSE)
+      ->addWhere('is_active', '=', TRUE)
+      ->setLimit(0)
+      ->execute();
+    foreach ($membership_types as $type) {
+      $membership_options[$type['id']] = $type['name'];
     }
   } catch (\Exception $e) {
     \Drupal::logger('commerce_civicrm')->error('Failed to retrieve CiviCRM Membership Types: @message', ['@message' => $e->getMessage()]);
-    $membership_options = [t('Error: Could not load membership types.')];
+    $membership_options[0] = t('Error: Could not load membership types.');
   }
-
 
   $form['civicrm']['membership_type'] = [
     '#type' => 'select',
@@ -121,24 +116,20 @@ function commerce_civicrm_form_commerce_product_form_alter(&$form, FormStateInte
     ],
   ];
 
-  // Fetch contribution types for the dropdown.
+  // Fetch financial types (for contributions) using APIv4.
+  $contribution_options = [];
   try {
-    $contribution_types = civicrm_api3('FinancialType', 'get', [
-        'sequential' => 1,
-        'is_active' => 1,
-        'options' => ['limit' => 0],
-    ]);
-    $contribution_options = [];
-    if (!empty($contribution_types['values'])) {
-        foreach ($contribution_types['values'] as $type) {
-            $contribution_options[$type['id']] = $type['name'];
-        }
+    $financial_types = FinancialType::get(FALSE)
+      ->addWhere('is_active', '=', TRUE)
+      ->setLimit(0)
+      ->execute();
+    foreach ($financial_types as $type) {
+      $contribution_options[$type['id']] = $type['name'];
     }
   } catch (\Exception $e) {
     \Drupal::logger('commerce_civicrm')->error('Failed to retrieve CiviCRM Financial Types: @message', ['@message' => $e->getMessage()]);
-    $contribution_options = [t('Error: Could not load contribution types.')];
+    $contribution_options[0] = t('Error: Could not load financial types.');
   }
-
 
   $form['civicrm']['contribution_type'] = [
     '#type' => 'select',
@@ -154,7 +145,8 @@ function commerce_civicrm_form_commerce_product_form_alter(&$form, FormStateInte
   ];
 
   // Add a custom submit handler to save the CiviCRM settings.
-  $form['actions']['submit']['#submit'][] = 'commerce_civicrm_product_form_submit';
+  // This ensures our handler runs in addition to the main one.
+  array_unshift($form['actions']['submit']['#submit'], 'commerce_civicrm_product_form_submit');
 }
 
 /**
@@ -164,6 +156,10 @@ function commerce_civicrm_product_form_submit(&$form, FormStateInterface $form_s
   $values = $form_state->getValues();
   /** @var \Drupal\commerce_product\Entity\ProductInterface $product */
   $product = $form_state->getFormObject()->getEntity();
+
+  if (!$product->hasField('field_civicrm')) {
+    return;
+  }
 
   $civicrm_enabled = !empty($values['civicrm']['enabled']);
   $civicrm_entity = $values['civicrm']['entity'];
@@ -177,123 +173,13 @@ function commerce_civicrm_product_form_submit(&$form, FormStateInterface $form_s
     }
   }
 
-  // Save the data to the product's CiviCRM field.
-  // This assumes you have a field named 'field_civicrm' on your product.
-  // The field type should be a simple text or a custom field type capable of storing these settings.
-  // For this example, we'll serialize the data into a text field.
+  // Save settings as a JSON string for safety and interoperability.
   $settings = [
     'enabled' => $civicrm_enabled,
     'entity' => $civicrm_entity,
     'entity_id' => $civicrm_entity_id,
   ];
 
-  $product->set('field_civicrm', serialize($settings));
-  // The product is saved by the main form submit handler, so we don't need to call save() here.
-}
-
-
-/**
- * Implements hook_commerce_order_presave().
- *
- * This is a critical hook. When an order is being saved, we check if it has been
- * paid and if it contains products linked to CiviCRM.
- *
- * Note: In Drupal 10/11, it's often better to use Event Subscribers instead of hooks
- * for better performance and adherence to modern OOP practices. An upgrade could involve
- * converting this hook to an OrderEvent subscriber.
- */
-function commerce_civicrm_commerce_order_presave(OrderInterface $order) {
-  // Check if the order has just been paid.
-  $original_state = isset($order->original) ? $order->original->getState()->getId() : NULL;
-  $new_state = $order->getState()->getId();
-  $is_paid = $order->isPaid();
-
-  // Process only when the order is fully paid.
-  // We also check original state to avoid processing the same order multiple times.
-  if (!$is_paid || $original_state === $new_state) {
-    return;
-  }
-
-  \Drupal::service('civicrm')->initialize();
-  $user = $order->getCustomer();
-  $params = [];
-
-  // Find the CiviCRM contact ID for the Drupal user.
-  try {
-    $contact = civicrm_api3('UFMatch', 'get', [
-      'sequential' => 1,
-      'uf_id' => $user->id(),
-    ]);
-    if (empty($contact['id'])) {
-      \Drupal::logger('commerce_civicrm')->warning('Could not find CiviCRM contact for user ID @uid.', ['@uid' => $user->id()]);
-      return;
-    }
-    $contact_id = $contact['values'][0]['contact_id'];
-  } catch (\Exception $e) {
-    \Drupal::logger('commerce_civicrm')->error('Error finding CiviCRM contact: @message', ['@message' => $e->getMessage()]);
-    return;
-  }
-
-
-  foreach ($order->getItems() as $order_item) {
-    $product = $order_item->getPurchasedEntity()->getProduct();
-    if (!$product || !$product->hasField('field_civicrm')) {
-      continue;
-    }
-
-    $settings_raw = $product->get('field_civicrm')->value;
-    if (empty($settings_raw)) {
-        continue;
-    }
-    $settings = unserialize($settings_raw);
-
-    if (empty($settings['enabled'])) {
-      continue;
-    }
-
-    // Process based on entity type
-    if ($settings['entity'] === 'membership' && !empty($settings['entity_id'])) {
-      _commerce_civicrm_process_membership($order, $contact_id, $settings['entity_id']);
-    } elseif ($settings['entity'] === 'contribution' && !empty($settings['entity_id'])) {
-      _commerce_civicrm_process_contribution($order, $contact_id, $settings['entity_id']);
-    }
-  }
-}
-
-/**
- * Helper function to create/renew a CiviCRM membership.
- */
-function _commerce_civicrm_process_membership(OrderInterface $order, $contact_id, $membership_type_id) {
-  try {
-    civicrm_api3('Membership', 'create', [
-      'contact_id' => $contact_id,
-      'membership_type_id' => $membership_type_id,
-      'source' => 'Drupal Commerce Order ' . $order->id(),
-      // Add other relevant parameters like join_date, start_date, etc.
-      'join_date' => date('Y-m-d'),
-      'status_id' => 'New', // Or calculate based on rules
-    ]);
-    \Drupal::logger('commerce_civicrm')->info('Successfully created/renewed membership for contact @cid from order @oid.', ['@cid' => $contact_id, '@oid' => $order->id()]);
-  } catch (\Exception $e) {
-    \Drupal::logger('commerce_civicrm')->error('Failed to create membership: @message', ['@message' => $e->getMessage()]);
-  }
-}
-
-/**
- * Helper function to create a CiviCRM contribution.
- */
-function _commerce_civicrm_process_contribution(OrderInterface $order, $contact_id, $financial_type_id) {
-    try {
-        civicrm_api3('Contribution', 'create', [
-            'contact_id' => $contact_id,
-            'financial_type_id' => $financial_type_id,
-            'total_amount' => $order->getTotalPrice()->getNumber(),
-            'currency' => $order->getTotalPrice()->getCurrencyCode(),
-            'source' => 'Drupal Commerce Order ' . $order->id(),
-            'contribution_status_id' => 'Completed',
-        ]);
-        \Drupal::logger('commerce_civicrm')->info('Successfully created contribution for contact @cid from order @oid.', ['@cid' => $contact_id, '@oid' => $order->id()]);
-    } catch (\Exception $e) {
-        \Drupal::logger('commerce_civicrm')->error('Failed to create contribution: @message', ['@message' => $e->getMessage()]);
-    }
+  $product->set('field_civicrm', json_encode($settings));
+  // No need to save the product here, the main entity form submit handler does it.
 }

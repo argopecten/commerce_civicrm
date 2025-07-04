@@ -1,0 +1,79 @@
+<?php
+
+/**
+ * @file
+ * Install, update and uninstall functions for the Commerce CiviCRM module.
+ */
+
+use Drupal\Core\StringTranslation\StringTranslationTrait;
+
+/**
+ * Implements hook_requirements().
+ *
+ * This hook checks if the CiviCRM dependency is met. While this is also
+ * declared in the .info.yml file, this provides a more user-friendly
+ * message on the status report page.
+ */
+function commerce_civicrm_requirements($phase) {
+  $requirements = [];
+  $t = \Drupal::translation();
+
+  // Check for the CiviCRM core API.
+  // The official 'civicrm' Drupal module should provide this.
+  $civicrm_installed = FALSE;
+  if (function_exists('civicrm_initialize')) {
+    try {
+      if (civicrm_initialize()) {
+        $civicrm_installed = TRUE;
+      }
+    }
+    catch (\Exception $e) {
+      // CiviCRM might not be configured yet, which can throw an exception.
+      $civicrm_installed = FALSE;
+    }
+  }
+
+  // Also check for the CiviCRM service, which is another indicator.
+  if (!$civicrm_installed && \Drupal::hasService('civicrm')) {
+      $civicrm_installed = TRUE;
+  }
+
+
+  if ($civicrm_installed) {
+    // If check is during runtime, show a success message on the status report.
+    if ($phase === 'runtime') {
+      $requirements['commerce_civicrm_civicrm'] = [
+        'title' => $t->translate('Commerce CiviCRM'),
+        'value' => $t->translate('CiviCRM is installed and accessible.'),
+        'severity' => REQUIREMENT_OK,
+      ];
+    }
+  }
+  else {
+    // If CiviCRM is not found, block installation or show an error.
+    $requirements['commerce_civicrm_civicrm'] = [
+      'title' => $t->translate('Commerce CiviCRM'),
+      'description' => $t->translate('The Commerce CiviCRM module requires CiviCRM to be installed and correctly configured. Please enable and configure the CiviCRM module. For more information, see the <a href=":url">CiviCRM documentation</a>.', [
+        ':url' => 'https://docs.civicrm.org/installation/drupal/',
+      ]),
+      'severity' => REQUIREMENT_ERROR,
+      'value' => $t->translate('CiviCRM not found'),
+    ];
+  }
+
+  return $requirements;
+}
+
+/**
+ * Implements hook_uninstall().
+ *
+ * This hook is executed when the module is uninstalled. It's responsible
+ * for cleaning up any artifacts created by the module, such as configuration.
+ */
+function commerce_civicrm_uninstall() {
+  // Get the configuration factory service.
+  $config_factory = \Drupal::configFactory();
+
+  // Delete the module's configuration settings to ensure a clean uninstall.
+  $config_factory->getEditable('commerce_civicrm.settings')->delete();
+}

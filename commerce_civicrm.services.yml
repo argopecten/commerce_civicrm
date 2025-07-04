@@ -1,0 +1,12 @@
+# This file defines the services provided by the Commerce CiviCRM module.
+# It should be placed in the root of the module directory.
+services:
+  # Defines the event subscriber for processing completed orders.
+  commerce_civicrm.order_complete_subscriber:
+    # The class that contains the subscriber logic.
+    class: Drupal\commerce_civicrm\EventSubscriber\OrderCompleteSubscriber
+    # Services to be injected into the subscriber's constructor.
+    arguments: ['@logger.factory', '@entity_type.manager']
+    # Tag the service as an event subscriber so Drupal knows to register it.
+    tags:
+      - { name: event_subscriber }
