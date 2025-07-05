@@ -5,75 +5,179 @@
  * Install, update and uninstall functions for the Commerce CiviCRM module.
  */
 
-use Drupal\Core\StringTranslation\StringTranslationTrait;
-
 /**
  * Implements hook_requirements().
- *
- * This hook checks if the CiviCRM dependency is met. While this is also
- * declared in the .info.yml file, this provides a more user-friendly
- * message on the status report page.
  */
 function commerce_civicrm_requirements($phase) {
   $requirements = [];
-  $t = \Drupal::translation();
-
-  // Check for the CiviCRM core API.
-  // The official 'civicrm' Drupal module should provide this.
-  $civicrm_installed = FALSE;
-  if (function_exists('civicrm_initialize')) {
-    try {
-      if (civicrm_initialize()) {
-        $civicrm_installed = TRUE;
-      }
-    }
-    catch (\Exception $e) {
-      // CiviCRM might not be configured yet, which can throw an exception.
-      $civicrm_installed = FALSE;
-    }
-  }
-
-  // Also check for the CiviCRM service, which is another indicator.
-  if (!$civicrm_installed && \Drupal::hasService('civicrm')) {
-      $civicrm_installed = TRUE;
-  }
-
-
-  if ($civicrm_installed) {
-    // If check is during runtime, show a success message on the status report.
-    if ($phase === 'runtime') {
+  
+  if ($phase === 'runtime') {
+    // Check if CiviCRM module is enabled
+    if (!\Drupal::hasService('civicrm')) {
       $requirements['commerce_civicrm_civicrm'] = [
-        'title' => $t->translate('Commerce CiviCRM'),
-        'value' => $t->translate('CiviCRM is installed and accessible.'),
-        'severity' => REQUIREMENT_OK,
+        'title' => t('Commerce CiviCRM - CiviCRM Module'),
+        'description' => t('CiviCRM module is required but not enabled.'),
+        'severity' => REQUIREMENT_ERROR,
+        'value' => t('Not available'),
       ];
     }
+    
+    // Check if CiviCRM Tools module is enabled
+    if (!\Drupal::hasService('civicrm_tools.config')) {
+      $requirements['commerce_civicrm_tools'] = [
+        'title' => t('Commerce CiviCRM - CiviCRM Tools Module'),
+        'description' => t('CiviCRM Tools module is required but not enabled.'),
+        'severity' => REQUIREMENT_ERROR,
+        'value' => t('Not available'),
+      ];
+    }
+    
+    // Check if CiviCRM is properly configured
+    if (\Drupal::hasService('commerce_civicrm.civicrm_helper')) {
+      try {
+        $helper = \Drupal::service('commerce_civicrm.civicrm_helper');
+        if ($helper->isAvailable()) {
+          $requirements['commerce_civicrm_status'] = [
+            'title' => t('Commerce CiviCRM - CiviCRM Status'),
+            'description' => t('CiviCRM is properly configured and available.'),
+            'severity' => REQUIREMENT_OK,
+            'value' => t('Available'),
+          ];
+        } else {
+          $requirements['commerce_civicrm_status'] = [
+            'title' => t('Commerce CiviCRM - CiviCRM Status'),
+            'description' => t('CiviCRM is not properly configured or not accessible.'),
+            'severity' => REQUIREMENT_WARNING,
+            'value' => t('Not accessible'),
+          ];
+        }
+      } catch (\Exception $e) {
+        $requirements['commerce_civicrm_status'] = [
+          'title' => t('Commerce CiviCRM - CiviCRM Status'),
+          'description' => t('Error checking CiviCRM status: @error', ['@error' => $e->getMessage()]),
+          'severity' => REQUIREMENT_ERROR,
+          'value' => t('Error'),
+        ];
+      }
+    }
   }
-  else {
-    // If CiviCRM is not found, block installation or show an error.
-    $requirements['commerce_civicrm_civicrm'] = [
-      'title' => $t->translate('Commerce CiviCRM'),
-      'description' => $t->translate('The Commerce CiviCRM module requires CiviCRM to be installed and correctly configured. Please enable and configure the CiviCRM module. For more information, see the <a href=":url">CiviCRM documentation</a>.', [
-        ':url' => 'https://docs.civicrm.org/installation/drupal/',
-      ]),
-      'severity' => REQUIREMENT_ERROR,
-      'value' => $t->translate('CiviCRM not found'),
-    ];
-  }
-
+  
   return $requirements;
 }
 
 /**
  * Implements hook_uninstall().
- *
- * This hook is executed when the module is uninstalled. It's responsible
- * for cleaning up any artifacts created by the module, such as configuration.
  */
 function commerce_civicrm_uninstall() {
-  // Get the configuration factory service.
   $config_factory = \Drupal::configFactory();
+  
+  // List of configuration objects to delete.
+  $config_names = [
+    'commerce_civicrm.settings',
+    'views.view.commerce_civicrm_orders_by_user',
+  ];
 
-  // Delete the module's configuration settings to ensure a clean uninstall.
-  $config_factory->getEditable('commerce_civicrm.settings')->delete();
+  // Delete configuration objects.
+  foreach ($config_names as $config_name) {
+    $config = $config_factory->getEditable($config_name);
+    if (!$config->isNew()) {
+      $config->delete();
+    }
+  }
+
+  // Remove the field_civicrm field from all product bundles
+  $field_config = \Drupal::entityTypeManager()->getStorage('field_config');
+  $field_storage = \Drupal::entityTypeManager()->getStorage('field_storage_config');
+  
+  // Get all product bundles
+  $product_bundles = \Drupal::service('entity_type.bundle.info')->getBundleInfo('commerce_product');
+  
+  // Remove field from all product bundles
+  foreach ($product_bundles as $bundle => $info) {
+    $field = $field_config->load('commerce_product.' . $bundle . '.field_civicrm');
+    if ($field) {
+      $field->delete();
+    }
+  }
+  
+  // Remove field storage
+  $storage = $field_storage->load('commerce_product.field_civicrm');
+  if ($storage) {
+    $storage->delete();
+  }
+
+  // Clear relevant caches to ensure clean removal.
+  \Drupal::cache('discovery')->deleteAll();
+  \Drupal::cache('config')->deleteAll();
+  
+  // Clear views cache specifically.
+  if (\Drupal::hasService('views.executable')) {
+    views_invalidate_cache();
+  }
+  
+  // Clear field caches
+  \Drupal::service('entity_field.manager')->clearCachedFieldDefinitions();
+}
+
+/**
+ * Implements hook_install().
+ */
+function commerce_civicrm_install() {
+  // Create the field_civicrm field on product entities if it doesn't exist
+  $field_storage = \Drupal::entityTypeManager()->getStorage('field_storage_config');
+  $field_config = \Drupal::entityTypeManager()->getStorage('field_config');
+  
+  // Check if field storage already exists
+  $storage_exists = $field_storage->load('commerce_product.field_civicrm');
+  
+  if (!$storage_exists) {
+    // Create field storage
+    $field_storage->create([
+      'field_name' => 'field_civicrm',
+      'entity_type' => 'commerce_product',
+      'type' => 'text_long',
+      'cardinality' => 1,
+      'settings' => [],
+    ])->save();
+    
+    // Get all product bundles
+    $product_bundles = \Drupal::service('entity_type.bundle.info')->getBundleInfo('commerce_product');
+    
+    // Add field to all product bundles
+    foreach ($product_bundles as $bundle => $info) {
+      $field_exists = $field_config->load('commerce_product.' . $bundle . '.field_civicrm');
+      
+      if (!$field_exists) {
+        $field_config->create([
+          'field_name' => 'field_civicrm',
+          'entity_type' => 'commerce_product',
+          'bundle' => $bundle,
+          'label' => 'CiviCRM Integration Settings',
+          'description' => 'Configuration for CiviCRM integration when this product is purchased.',
+          'required' => FALSE,
+          'settings' => [],
+          'default_value' => [],
+        ])->save();
+        
+        // Set the field to be hidden by default in form and view displays
+        $form_display = \Drupal::entityTypeManager()
+          ->getStorage('entity_form_display')
+          ->load('commerce_product.' . $bundle . '.default');
+        
+        if ($form_display) {
+          $form_display->removeComponent('field_civicrm')->save();
+        }
+        
+        $view_display = \Drupal::entityTypeManager()
+          ->getStorage('entity_view_display')
+          ->load('commerce_product.' . $bundle . '.default');
+        
+        if ($view_display) {
+          $view_display->removeComponent('field_civicrm')->save();
+        }
+      }
+    }
+    
+    \Drupal::messenger()->addMessage(t('CiviCRM field has been added to product types. You can now configure CiviCRM integration on product edit forms.'));
+  }
 }

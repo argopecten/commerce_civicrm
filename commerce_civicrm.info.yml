@@ -5,10 +5,14 @@ package: Commerce
 core_version_requirement: ^10.3 || ^11
 dependencies:
   - civicrm:civicrm
+  - civicrm:civicrm_tools
   - drupal:commerce_product
   - drupal:commerce_order
   - drupal:commerce_payment
   - drupal:user
+  - drupal:profile
+  - drupal:state_machine
+  - drupal:rules
 config:
   install:
     - views.view.commerce_civicrm_orders_by_user

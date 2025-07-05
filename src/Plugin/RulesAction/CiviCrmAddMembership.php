@@ -6,6 +6,8 @@ use Drupal\rules\Core\RulesActionBase;
 use Drupal\user\UserInterface;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
 use Drupal\Core\StringTranslation\StringTranslationTrait;
+use Drupal\commerce_civicrm\Service\ContactUpdater;
+use Drupal\civicrm_tools\CivicrmToolsInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
@@ -13,21 +15,21 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
  * Provides a 'Add a CiviCRM Membership' action.
  *
  * @RulesAction(
- * id = "commerce_civicrm_add_membership",
- * label = @Translation("Add a CiviCRM Membership"),
- * category = @Translation("CiviCRM"),
- * context_definitions = {
- * "user" = @ContextDefinition("entity:user",
- * label = @Translation("User"),
- * description = @Translation("The user for whom to create the membership."),
- * assignment_restriction = "selector"
- * ),
- * "membership_type_id" = @ContextDefinition("integer",
- * label = @Translation("Membership Type ID"),
- * description = @Translation("The ID of the CiviCRM Membership Type to create or renew."),
- * assignment_restriction = "input"
- * ),
- * }
+ *   id = "commerce_civicrm_add_membership",
+ *   label = @Translation("Add a CiviCRM Membership"),
+ *   category = @Translation("CiviCRM"),
+ *   context_definitions = {
+ *     "user" = @ContextDefinition("entity:user",
+ *       label = @Translation("User"),
+ *       description = @Translation("The user for whom to create the membership."),
+ *       assignment_restriction = "selector"
+ *     ),
+ *     "membership_type_id" = @ContextDefinition("integer",
+ *       label = @Translation("Membership Type ID"),
+ *       description = @Translation("The ID of the CiviCRM Membership Type to create or renew."),
+ *       assignment_restriction = "input"
+ *     ),
+ *   }
  * )
  */
 class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPluginInterface {
@@ -42,20 +44,40 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
   protected $logger;
 
   /**
+   * The contact updater service.
+   *
+   * @var \Drupal\commerce_civicrm\Service\ContactUpdater
+   */
+  protected $contactUpdater;
+
+  /**
+   * The CiviCRM tools service.
+   *
+   * @var \Drupal\civicrm_tools\CivicrmToolsInterface
+   */
+  protected $civicrmTools;
+
+  /**
    * Constructs a CiviCrmAddMembership object.
    *
    * @param array $configuration
-   * A configuration array containing information about the plugin instance.
+   *   A configuration array containing information about the plugin instance.
    * @param string $plugin_id
-   * The plugin ID for the plugin instance.
+   *   The plugin ID for the plugin instance.
    * @param mixed $plugin_definition
-   * The plugin implementation definition.
+   *   The plugin implementation definition.
    * @param \Psr\Log\LoggerInterface $logger
-   * The logger service.
+   *   The logger service.
+   * @param \Drupal\commerce_civicrm\Service\ContactUpdater $contact_updater
+   *   The contact updater service.
+   * @param \Drupal\civicrm_tools\CivicrmToolsInterface $civicrm_tools
+   *   The CiviCRM tools service.
    */
-  public function __construct(array $configuration, $plugin_id, $plugin_definition, LoggerInterface $logger) {
+  public function __construct(array $configuration, $plugin_id, $plugin_definition, LoggerInterface $logger, ContactUpdater $contact_updater, CivicrmToolsInterface $civicrm_tools) {
     parent::__construct($configuration, $plugin_id, $plugin_definition);
     $this->logger = $logger;
+    $this->contactUpdater = $contact_updater;
+    $this->civicrmTools = $civicrm_tools;
   }
 
   /**
@@ -66,7 +88,9 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
       $configuration,
       $plugin_id,
       $plugin_definition,
-      $container->get('logger.factory')->get('commerce_civicrm')
+      $container->get('logger.factory')->get('commerce_civicrm'),
+      $container->get('commerce_civicrm.contact_updater'),
+      $container->get('civicrm_tools.config')
     );
   }
 
@@ -74,48 +98,49 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
    * Executes the action.
    *
    * @param \Drupal\user\UserInterface $user
-   * The user.
+   *   The user.
    * @param int $membership_type_id
-   * The CiviCRM membership type ID.
+   *   The CiviCRM membership type ID.
    */
   protected function doExecute(UserInterface $user, int $membership_type_id) {
-    // Ensure CiviCRM is initialized.
-    \Drupal::service('civicrm')->initialize();
-
-    // Find the CiviCRM contact ID for the Drupal user.
-    try {
-      $uf_match = civicrm_api3('UFMatch', 'get', [
-        'sequential' => 1,
-        'uf_id' => $user->id(),
-      ]);
-      if (empty($uf_match['id'])) {
-        $this->logger->warning('Could not find CiviCRM contact for user ID @uid.', ['@uid' => $user->id()]);
-        return;
-      }
-      $contact_id = $uf_match['values'][0]['contact_id'];
-    }
-    catch (\Exception $e) {
-      $this->logger->error('Error finding CiviCRM contact for user @uid: @message', [
+    // Get the CiviCRM contact ID for the user
+    $contact_id = $this->contactUpdater->getContactIdByUser($user);
+    
+    if (!$contact_id) {
+      $this->logger->warning('Could not find CiviCRM contact for user @uid when creating membership', [
         '@uid' => $user->id(),
-        '@message' => $e->getMessage(),
       ]);
       return;
     }
 
-    // Create the membership in CiviCRM.
+    // Create the membership using CiviCRM API
     try {
-      civicrm_api3('Membership', 'create', [
-        'contact_id' => $contact_id,
-        'membership_type_id' => $membership_type_id,
-        'source' => $this->t('Drupal Commerce via Rules'),
-        'join_date' => date('Y-m-d'),
-        'status_id' => 'New', // This could be customized further if needed.
-      ]);
-      $this->logger->info('Successfully created/renewed CiviCRM membership for contact @cid.', ['@cid' => $contact_id]);
-    }
-    catch (\Exception $e) {
-      $this->logger->error('Failed to create CiviCRM membership for contact @cid: @message', [
-        '@cid' => $contact_id,
+      $api = $this->civicrmTools->getApi();
+      
+      $result = $api->Membership->create(FALSE)
+        ->setValues([
+          'contact_id' => $contact_id,
+          'membership_type_id' => $membership_type_id,
+          'source' => 'Drupal Commerce via Rules',
+          'join_date' => date('Y-m-d'),
+          'status_id' => 'New',
+        ])
+        ->execute();
+      
+      if ($result->count() > 0) {
+        $membership_id = $result->first()['id'];
+        $this->logger->info('Successfully created/renewed CiviCRM membership @membership_id for contact @contact_id', [
+          '@membership_id' => $membership_id,
+          '@contact_id' => $contact_id,
+        ]);
+      } else {
+        $this->logger->error('Failed to create CiviCRM membership for contact @contact_id: No result returned', [
+          '@contact_id' => $contact_id,
+        ]);
+      }
+    } catch (\Exception $e) {
+      $this->logger->error('Failed to create CiviCRM membership for contact @contact_id: @message', [
+        '@contact_id' => $contact_id,
         '@message' => $e->getMessage(),
       ]);
     }
