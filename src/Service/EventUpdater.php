@@ -4,7 +4,6 @@ namespace Drupal\commerce_civicrm\Service;
 
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
-use Drupal\civicrm_tools\CivicrmToolsInterface;
 use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_order\Entity\OrderItemInterface;
 
@@ -28,26 +27,16 @@ class EventUpdater {
   protected $logger;
 
   /**
-   * The CiviCRM tools service.
-   *
-   * @var \Drupal\civicrm_tools\CivicrmToolsInterface
-   */
-  protected $civicrmTools;
-
-  /**
    * Constructs an EventUpdater object.
    *
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entity_type_manager
    *   The entity type manager.
    * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $logger_factory
    *   The logger factory.
-   * @param \Drupal\civicrm_tools\CivicrmToolsInterface $civicrm_tools
-   *   The CiviCRM tools service.
    */
-  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory, CivicrmToolsInterface $civicrm_tools) {
+  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory) {
     $this->entityTypeManager = $entity_type_manager;
     $this->logger = $logger_factory->get('commerce_civicrm');
-    $this->civicrmTools = $civicrm_tools;
   }
 
   /**
@@ -182,9 +171,11 @@ class EventUpdater {
    */
   protected function findEventByTitle($title) {
     try {
-      $api = $this->civicrmTools->getApi();
+      if (!class_exists('\Civi\Api4\Event')) {
+        \Drupal::service('civicrm')->initialize();
+      }
       
-      $result = $api->Event->get(FALSE)
+      $result = \Civi\Api4\Event::get(FALSE)
         ->addSelect('id')
         ->addWhere('title', '=', $title)
         ->addWhere('is_active', '=', TRUE)
@@ -218,9 +209,11 @@ class EventUpdater {
    */
   protected function findExistingParticipant($event_id, $contact_id, OrderInterface $order) {
     try {
-      $api = $this->civicrmTools->getApi();
+      if (!class_exists('\Civi\Api4\Participant')) {
+        \Drupal::service('civicrm')->initialize();
+      }
       
-      $result = $api->Participant->get(FALSE)
+      $result = \Civi\Api4\Participant::get(FALSE)
         ->addSelect('id')
         ->addWhere('event_id', '=', $event_id)
         ->addWhere('contact_id', '=', $contact_id)
@@ -257,7 +250,9 @@ class EventUpdater {
    */
   protected function createEventRegistration($event_id, $contact_id, OrderItemInterface $order_item, OrderInterface $order) {
     try {
-      $api = $this->civicrmTools->getApi();
+      if (!class_exists('\Civi\Api4\Participant')) {
+        \Drupal::service('civicrm')->initialize();
+      }
       
       // Prepare participant data
       $participant_data = [
@@ -272,7 +267,7 @@ class EventUpdater {
       ];
       
       // Create the participant
-      $result = $api->Participant->create(FALSE)
+      $result = \Civi\Api4\Participant::create(FALSE)
         ->setValues($participant_data)
         ->execute();
       
@@ -304,9 +299,11 @@ class EventUpdater {
    */
   protected function getParticipantStatusId($status_name) {
     try {
-      $api = $this->civicrmTools->getApi();
+      if (!class_exists('\Civi\Api4\OptionValue')) {
+        \Drupal::service('civicrm')->initialize();
+      }
       
-      $result = $api->OptionValue->get(FALSE)
+      $result = \Civi\Api4\OptionValue::get(FALSE)
         ->addSelect('value')
         ->addWhere('option_group_id:name', '=', 'participant_status')
         ->addWhere('name', '=', $status_name)
@@ -336,9 +333,11 @@ class EventUpdater {
    */
   protected function getParticipantRoleId($role_name) {
     try {
-      $api = $this->civicrmTools->getApi();
+      if (!class_exists('\Civi\Api4\OptionValue')) {
+        \Drupal::service('civicrm')->initialize();
+      }
       
-      $result = $api->OptionValue->get(FALSE)
+      $result = \Civi\Api4\OptionValue::get(FALSE)
         ->addSelect('value')
         ->addWhere('option_group_id:name', '=', 'participant_role')
         ->addWhere('name', '=', $role_name)
@@ -370,9 +369,11 @@ class EventUpdater {
    */
   public function updateEventRegistration($participant_id, array $participant_data) {
     try {
-      $api = $this->civicrmTools->getApi();
+      if (!class_exists('\Civi\Api4\Participant')) {
+        \Drupal::service('civicrm')->initialize();
+      }
       
-      $result = $api->Participant->update(FALSE)
+      $result = \Civi\Api4\Participant::update(FALSE)
         ->addValue('id', $participant_id)
         ->setValues($participant_data)
         ->execute();

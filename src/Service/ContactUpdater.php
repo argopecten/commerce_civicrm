@@ -4,7 +4,6 @@ namespace Drupal\commerce_civicrm\Service;
 
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
-use Drupal\civicrm_tools\CivicrmToolsInterface;
 use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_product\Entity\ProductInterface;
 use Drupal\profile\Entity\ProfileInterface;
@@ -30,26 +29,16 @@ class ContactUpdater {
   protected $logger;
 
   /**
-   * The CiviCRM tools service.
-   *
-   * @var \Drupal\civicrm_tools\CivicrmToolsInterface
-   */
-  protected $civicrmTools;
-
-  /**
    * Constructs a ContactUpdater object.
    *
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entity_type_manager
    *   The entity type manager.
    * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $logger_factory
    *   The logger factory.
-   * @param \Drupal\civicrm_tools\CivicrmToolsInterface $civicrm_tools
-   *   The CiviCRM tools service.
    */
-  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory, CivicrmToolsInterface $civicrm_tools) {
+  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory) {
     $this->entityTypeManager = $entity_type_manager;
     $this->logger = $logger_factory->get('commerce_civicrm');
-    $this->civicrmTools = $civicrm_tools;
   }
 
   /**
@@ -326,9 +315,17 @@ class ContactUpdater {
    */
   public function getContactIdByUser(UserInterface $user) {
     try {
-      $api = $this->civicrmTools->getApi();
+      // Initialize CiviCRM
+      if (!\Drupal::hasService('civicrm')) {
+        return NULL;
+      }
       
-      $result = $api->UFMatch->get(FALSE)
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return NULL;
+      }
+
+      $result = \Civi\Api4\UFMatch::get(FALSE)
         ->addWhere('uf_id', '=', $user->id())
         ->execute();
       
@@ -359,9 +356,17 @@ class ContactUpdater {
     $options = [];
 
     try {
-      $api = $this->civicrmTools->getApi();
+      // Initialize CiviCRM
+      if (!\Drupal::hasService('civicrm')) {
+        return ['' => t('CiviCRM not available')];
+      }
       
-      $result = $api->MembershipType->get(FALSE)
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return ['' => t('CiviCRM not available')];
+      }
+
+      $result = \Civi\Api4\MembershipType::get(FALSE)
         ->addWhere('is_active', '=', TRUE)
         ->addOrderBy('name', 'ASC')
         ->setLimit(0)
@@ -394,9 +399,17 @@ class ContactUpdater {
     $options = [];
 
     try {
-      $api = $this->civicrmTools->getApi();
+      // Initialize CiviCRM
+      if (!\Drupal::hasService('civicrm')) {
+        return ['' => t('CiviCRM not available')];
+      }
       
-      $result = $api->FinancialType->get(FALSE)
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return ['' => t('CiviCRM not available')];
+      }
+
+      $result = \Civi\Api4\FinancialType::get(FALSE)
         ->addWhere('is_active', '=', TRUE)
         ->addOrderBy('name', 'ASC')
         ->setLimit(0)

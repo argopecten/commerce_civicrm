@@ -17,7 +17,6 @@ services:
   # Each updater service has access to:
   #   @entity_type.manager - For handling Drupal entities (orders, customers, etc.)
   #   @logger.factory - For logging operations and debugging
-  #   @civicrm_tools.config - For CiviCRM configuration and API access
   # The orchestrator service (order_civicrm_updater) receives all three updater services as dependencies,
   # allowing it to coordinate the complete CiviCRM update process
   commerce_civicrm.order_civicrm_updater:
@@ -36,7 +35,6 @@ services:
     arguments: 
       - '@entity_type.manager'
       - '@logger.factory'
-      - '@civicrm_tools.config'
     tags:
       - { name: service }
 
@@ -46,7 +44,6 @@ services:
     arguments:
       - '@entity_type.manager'
       - '@logger.factory'
-      - '@civicrm_tools.config'
     tags:
       - { name: service }
 
@@ -56,7 +53,6 @@ services:
     arguments:
       - '@entity_type.manager'
       - '@logger.factory'
-      - '@civicrm_tools.config'
     tags:
       - { name: service }
 
@@ -65,7 +61,6 @@ services:
     class: Drupal\commerce_civicrm\Service\CivicrmHelper
     arguments:
       - '@logger.factory'
-      - '@civicrm_tools.config'
     tags:
       - { name: service }
 

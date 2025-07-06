@@ -22,16 +22,6 @@ function commerce_civicrm_requirements($phase) {
       ];
     }
     
-    // Check if CiviCRM Tools module is enabled
-    if (!\Drupal::hasService('civicrm_tools.config')) {
-      $requirements['commerce_civicrm_tools'] = [
-        'title' => t('Commerce CiviCRM - CiviCRM Tools Module'),
-        'description' => t('CiviCRM Tools module is required but not enabled.'),
-        'severity' => REQUIREMENT_ERROR,
-        'value' => t('Not available'),
-      ];
-    }
-    
     // Check if CiviCRM is properly configured
     if (\Drupal::hasService('commerce_civicrm.civicrm_helper')) {
       try {

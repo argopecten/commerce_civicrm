@@ -4,7 +4,6 @@ namespace Drupal\commerce_civicrm\Service;
 
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
-use Drupal\civicrm_tools\CivicrmToolsInterface;
 use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_payment\Entity\PaymentInterface;
 
@@ -28,26 +27,16 @@ class ContributionUpdater {
   protected $logger;
 
   /**
-   * The CiviCRM tools service.
-   *
-   * @var \Drupal\civicrm_tools\CivicrmToolsInterface
-   */
-  protected $civicrmTools;
-
-  /**
    * Constructs a ContributionUpdater object.
    *
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entity_type_manager
    *   The entity type manager.
    * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $logger_factory
    *   The logger factory.
-   * @param \Drupal\civicrm_tools\CivicrmToolsInterface $civicrm_tools
-   *   The CiviCRM tools service.
    */
-  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory, CivicrmToolsInterface $civicrm_tools) {
+  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory) {
     $this->entityTypeManager = $entity_type_manager;
     $this->logger = $logger_factory->get('commerce_civicrm');
-    $this->civicrmTools = $civicrm_tools;
   }
 
   /**
@@ -150,10 +139,12 @@ class ContributionUpdater {
    */
   protected function findExistingContribution(OrderInterface $order) {
     try {
-      $api = $this->civicrmTools->getApi();
+      if (!class_exists('\Civi\Api4\Contribution')) {
+        \Drupal::service('civicrm')->initialize();
+      }
       
       // Search by source field containing the order ID
-      $result = $api->Contribution->get(FALSE)
+      $result = \Civi\Api4\Contribution::get(FALSE)
         ->addSelect('id')
         ->addWhere('source', 'LIKE', '%Order #' . $order->id() . '%')
         ->setLimit(1)
@@ -182,9 +173,11 @@ class ContributionUpdater {
    */
   protected function createContribution(array $contribution_data) {
     try {
-      $api = $this->civicrmTools->getApi();
+      if (!class_exists('\Civi\Api4\Contribution')) {
+        \Drupal::service('civicrm')->initialize();
+      }
       
-      $result = $api->Contribution->create(FALSE)
+      $result = \Civi\Api4\Contribution::create(FALSE)
         ->setValues($contribution_data)
         ->execute();
       
@@ -212,10 +205,12 @@ class ContributionUpdater {
    */
   protected function getFinancialTypeId() {
     try {
-      $api = $this->civicrmTools->getApi();
+      if (!class_exists('\Civi\Api4\FinancialType')) {
+        \Drupal::service('civicrm')->initialize();
+      }
       
       // Try to get "Donation" financial type first, fallback to first available
-      $result = $api->FinancialType->get(FALSE)
+      $result = \Civi\Api4\FinancialType::get(FALSE)
         ->addSelect('id')
         ->addWhere('name', '=', 'Donation')
         ->setLimit(1)
@@ -226,7 +221,7 @@ class ContributionUpdater {
       }
       
       // Fallback to first available financial type
-      $result = $api->FinancialType->get(FALSE)
+      $result = \Civi\Api4\FinancialType::get(FALSE)
         ->addSelect('id')
         ->addWhere('is_active', '=', TRUE)
         ->setLimit(1)
@@ -255,7 +250,9 @@ class ContributionUpdater {
    */
   protected function getContributionStatusId(OrderInterface $order) {
     try {
-      $api = $this->civicrmTools->getApi();
+      if (!class_exists('\Civi\Api4\OptionValue')) {
+        \Drupal::service('civicrm')->initialize();
+      }
       
       // Map order states to contribution statuses
       $order_state = $order->getState()->getId();
@@ -274,7 +271,7 @@ class ContributionUpdater {
           break;
       }
       
-      $result = $api->OptionValue->get(FALSE)
+      $result = \Civi\Api4\OptionValue::get(FALSE)
         ->addSelect('value')
         ->addWhere('option_group_id:name', '=', 'contribution_status')
         ->addWhere('name', '=', $status_name)
@@ -347,7 +344,9 @@ class ContributionUpdater {
    */
   protected function getPaymentInstrumentId($gateway_plugin_id) {
     try {
-      $api = $this->civicrmTools->getApi();
+      if (!class_exists('\Civi\Api4\OptionValue')) {
+        \Drupal::service('civicrm')->initialize();
+      }
       
       // Map common payment gateways to CiviCRM payment instruments
       $instrument_mapping = [
@@ -360,7 +359,7 @@ class ContributionUpdater {
       
       $instrument_name = $instrument_mapping[$gateway_plugin_id] ?? 'Credit Card';
       
-      $result = $api->OptionValue->get(FALSE)
+      $result = \Civi\Api4\OptionValue::get(FALSE)
         ->addSelect('value')
         ->addWhere('option_group_id:name', '=', 'payment_instrument')
         ->addWhere('name', '=', $instrument_name)

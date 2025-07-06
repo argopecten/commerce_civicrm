@@ -7,7 +7,6 @@ dependencies:
     - commerce_payment
     - user
     - civicrm
-    - civicrm_tools
     - commerce_civicrm
 id: commerce_civicrm_orders_by_user
 label: 'My CiviCRM Orders'

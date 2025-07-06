@@ -3,7 +3,6 @@
 namespace Drupal\commerce_civicrm\Service;
 
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
-use Drupal\civicrm_tools\CivicrmToolsInterface;
 
 /**
  * Service for checking CiviCRM availability and providing helper methods.
@@ -18,23 +17,13 @@ class CivicrmHelper {
   protected $logger;
 
   /**
-   * The CiviCRM tools service.
-   *
-   * @var \Drupal\civicrm_tools\CivicrmToolsInterface
-   */
-  protected $civicrmTools;
-
-  /**
    * Constructs a CivicrmHelper object.
    *
    * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $logger_factory
    *   The logger factory.
-   * @param \Drupal\civicrm_tools\CivicrmToolsInterface $civicrm_tools
-   *   The CiviCRM tools service.
    */
-  public function __construct(LoggerChannelFactoryInterface $logger_factory, CivicrmToolsInterface $civicrm_tools) {
+  public function __construct(LoggerChannelFactoryInterface $logger_factory) {
     $this->logger = $logger_factory->get('commerce_civicrm');
-    $this->civicrmTools = $civicrm_tools;
   }
 
   /**
@@ -45,11 +34,21 @@ class CivicrmHelper {
    */
   public function isAvailable() {
     try {
-      $api = $this->civicrmTools->getApi();
+      // Initialize CiviCRM
+      if (!\Drupal::hasService('civicrm')) {
+        return FALSE;
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return FALSE;
+      }
+
       // Test with a simple API call to verify CiviCRM is working
-      $result = $api->Contact->get(FALSE)
+      $result = \Civi\Api4\Contact::get(FALSE)
         ->setLimit(1)
         ->execute();
+      
       return TRUE;
     } catch (\Exception $e) {
       $this->logger->error('CiviCRM availability check failed: @message', [
@@ -67,8 +66,17 @@ class CivicrmHelper {
    */
   public function getSystemInfo() {
     try {
-      $api = $this->civicrmTools->getApi();
-      $result = $api->System->get(FALSE)->execute();
+      // Initialize CiviCRM
+      if (!\Drupal::hasService('civicrm')) {
+        return [];
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return [];
+      }
+
+      $result = \Civi\Api4\System::get(FALSE)->execute();
       return $result->getArrayCopy();
     } catch (\Exception $e) {
       $this->logger->error('Failed to get CiviCRM system info: @message', [

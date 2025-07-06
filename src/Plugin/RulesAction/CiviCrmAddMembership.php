@@ -7,7 +7,6 @@ use Drupal\user\UserInterface;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
 use Drupal\Core\StringTranslation\StringTranslationTrait;
 use Drupal\commerce_civicrm\Service\ContactUpdater;
-use Drupal\civicrm_tools\CivicrmToolsInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
@@ -51,13 +50,6 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
   protected $contactUpdater;
 
   /**
-   * The CiviCRM tools service.
-   *
-   * @var \Drupal\civicrm_tools\CivicrmToolsInterface
-   */
-  protected $civicrmTools;
-
-  /**
    * Constructs a CiviCrmAddMembership object.
    *
    * @param array $configuration
@@ -70,14 +62,11 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
    *   The logger service.
    * @param \Drupal\commerce_civicrm\Service\ContactUpdater $contact_updater
    *   The contact updater service.
-   * @param \Drupal\civicrm_tools\CivicrmToolsInterface $civicrm_tools
-   *   The CiviCRM tools service.
    */
-  public function __construct(array $configuration, $plugin_id, $plugin_definition, LoggerInterface $logger, ContactUpdater $contact_updater, CivicrmToolsInterface $civicrm_tools) {
+  public function __construct(array $configuration, $plugin_id, $plugin_definition, LoggerInterface $logger, ContactUpdater $contact_updater) {
     parent::__construct($configuration, $plugin_id, $plugin_definition);
     $this->logger = $logger;
     $this->contactUpdater = $contact_updater;
-    $this->civicrmTools = $civicrm_tools;
   }
 
   /**
@@ -89,8 +78,7 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
       $plugin_id,
       $plugin_definition,
       $container->get('logger.factory')->get('commerce_civicrm'),
-      $container->get('commerce_civicrm.contact_updater'),
-      $container->get('civicrm_tools.config')
+      $container->get('commerce_civicrm.contact_updater')
     );
   }
 
@@ -115,9 +103,11 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
 
     // Create the membership using CiviCRM API
     try {
-      $api = $this->civicrmTools->getApi();
+      if (!class_exists('\Civi\Api4\Membership')) {
+        \Drupal::service('civicrm')->initialize();
+      }
       
-      $result = $api->Membership->create(FALSE)
+      $result = \Civi\Api4\Membership::create(FALSE)
         ->setValues([
           'contact_id' => $contact_id,
           'membership_type_id' => $membership_type_id,
