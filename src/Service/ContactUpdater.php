@@ -8,6 +8,7 @@ use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_product\Entity\ProductInterface;
 use Drupal\profile\Entity\ProfileInterface;
 use Drupal\user\UserInterface;
+use Drupal\commerce_civicrm\Service\CivicrmInitializer;
 
 /**
  * Service for updating CiviCRM contacts based on Commerce Order data.
@@ -29,16 +30,26 @@ class ContactUpdater {
   protected $logger;
 
   /**
+   * The CiviCRM initializer service.
+   *
+   * @var \Drupal\commerce_civicrm\Service\CivicrmInitializer
+   */
+  protected $civicrmInitializer;
+
+  /**
    * Constructs a ContactUpdater object.
    *
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entity_type_manager
    *   The entity type manager.
    * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $logger_factory
    *   The logger factory.
+   * @param \Drupal\commerce_civicrm\Service\CivicrmInitializer $civicrm_initializer
+   *   The CiviCRM initializer service.
    */
-  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory) {
+  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory, CivicrmInitializer $civicrm_initializer) {
     $this->entityTypeManager = $entity_type_manager;
     $this->logger = $logger_factory->get('commerce_civicrm');
+    $this->civicrmInitializer = $civicrm_initializer;
   }
 
   /**
@@ -61,17 +72,46 @@ class ContactUpdater {
         return NULL;
       }
 
+      // Logging the billing profile ID for debugging
+      $this->logger->debug('Updating CiviCRM contact for order @order_id with billing profile @profile_id', [
+        '@order_id' => $order->id(),
+        '@profile_id' => $billing_profile->id(),
+      ]);
+
       // Extract contact data from the billing profile
       $contact_data = $this->extractContactData($billing_profile, $order);
-      
+      if (empty($contact_data)) {
+        $this->logger->warning('No valid contact data extracted for order @order_id', [
+          '@order_id' => $order->id(),
+        ]);
+        return NULL;
+      }
+
       // Check if contact already exists
       $existing_contact_id = $this->findExistingContact($contact_data);
+      if ($existing_contact_id === NULL) {
+        $this->logger->info('No existing CiviCRM contact found for order @order_id, creating new contact', [
+          '@order_id' => $order->id(),
+        ]);
+      } else {
+        $this->logger->info('Found existing CiviCRM contact @contact_id for order @order_id', [
+          '@contact_id' => $existing_contact_id,
+          '@order_id' => $order->id(),
+        ]);
+      }
       
       if ($existing_contact_id) {
         // Update existing contact
+        $this->logger->debug('Updating existing CiviCRM contact @contact_id for order @order_id', [
+          '@contact_id' => $existing_contact_id,
+          '@order_id' => $order->id(),
+        ]);
         return $this->updateExistingContact($existing_contact_id, $contact_data);
       } else {
         // Create new contact
+        $this->logger->debug('Creating new CiviCRM contact for order @order_id', [
+          '@order_id' => $order->id(),
+        ]);
         return $this->createNewContact($contact_data);
       }
     } catch (\Exception $e) {
@@ -119,6 +159,12 @@ class ContactUpdater {
     
     // Set contact type to Individual
     $contact_data['contact_type'] = 'Individual';
+
+    // Logging contact data for debugging
+    $this->logger->debug('Extracted contact data from order @order_id: @contact_data', [
+      '@order_id' => $order->id(),
+      '@contact_data' => print_r($contact_data, TRUE),
+    ]);
     
     return array_filter($contact_data); // Remove empty values
   }
@@ -133,28 +179,44 @@ class ContactUpdater {
    *   The existing contact ID if found, NULL otherwise.
    */
   protected function findExistingContact(array $contact_data) {
+    // Logging the contact data being searched
+    $this->logger->debug('Searching for existing CiviCRM contact with data: @contact_data', [
+      '@contact_data' => print_r($contact_data, TRUE),
+    ]);
+
     try {
       // Initialize CiviCRM first
-      if (!\Drupal::hasService('civicrm')) {
-        return NULL;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      if (!$this->initializeCivicrm()) {
         return NULL;
       }
       
       // First try to find by email using Email entity directly
       if (!empty($contact_data['email'])) {
+        // Logging the email search result
+        $this->logger->debug('Searching for existing contact by email: @email', [
+          '@email' => $contact_data['email'],
+        ]);
         $email_result = \Civi\Api4\Email::get(FALSE)
           ->addSelect('contact_id')
           ->addWhere('email', '=', $contact_data['email'])
-          ->addWhere('is_primary', '=', TRUE)
+          // ->addWhere('is_primary', '=', TRUE)
           ->setLimit(1)
           ->execute();
         
         if ($email_result->count() > 0) {
+          $this->logger->info('Found existing CiviCRM contact by email: @contact_id', [
+            '@contact_id' => $email_result->first()['contact_id'],
+          ]);
+
+          // Logging the found contact ID
+          $this->logger->debug('Found existing contact ID by email: @contact_id', [
+            '@contact_id' => $email_result->first()['contact_id'],
+          ]);
           return $email_result->first()['contact_id'];
+        } else {
+          $this->logger->debug('No existing contact found by email: @email', [
+            '@email' => $contact_data['email'],
+          ]);
         }
       }
       
@@ -168,9 +230,18 @@ class ContactUpdater {
           ->execute();
         
         if ($result->count() > 0) {
+          $this->logger->info('Found existing CiviCRM contact by name: @contact_id', [
+            '@contact_id' => $result->first()['id'],
+          ]);
           return $result->first()['id'];
         }
       }
+
+      // Logging if no existing contact found
+      $this->logger->info('No existing CiviCRM contact found for provided data: @contact_data', [
+        '@contact_data' => print_r($contact_data, TRUE),
+      ]);
+
     } catch (\Exception $e) {
       $this->logger->error('Error finding existing CiviCRM contact: @error', [
         '@error' => $e->getMessage(),
@@ -194,12 +265,7 @@ class ContactUpdater {
   protected function updateExistingContact($contact_id, array $contact_data) {
     try {
       // Initialize CiviCRM first
-      if (!\Drupal::hasService('civicrm')) {
-        return NULL;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      if (!$this->initializeCivicrm()) {
         return NULL;
       }
       
@@ -247,12 +313,7 @@ class ContactUpdater {
   protected function createNewContact(array $contact_data) {
     try {
       // Initialize CiviCRM first
-      if (!\Drupal::hasService('civicrm')) {
-        return NULL;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      if (!$this->initializeCivicrm()) {
         return NULL;
       }
       
@@ -298,12 +359,7 @@ class ContactUpdater {
   protected function updateContactEmail($contact_id, $email) {
     try {
       // Initialize CiviCRM first
-      if (!\Drupal::hasService('civicrm')) {
-        return;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      if (!$this->initializeCivicrm()) {
         return;
       }
       
@@ -349,12 +405,7 @@ class ContactUpdater {
   public function getContactIdByUser(UserInterface $user) {
     try {
       // Initialize CiviCRM
-      if (!\Drupal::hasService('civicrm')) {
-        return NULL;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      if (!$this->initializeCivicrm()) {
         return NULL;
       }
 
@@ -390,12 +441,7 @@ class ContactUpdater {
 
     try {
       // Initialize CiviCRM
-      if (!\Drupal::hasService('civicrm')) {
-        return ['' => t('CiviCRM not available')];
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      if (!$this->initializeCivicrm()) {
         return ['' => t('CiviCRM not available')];
       }
 
@@ -433,12 +479,7 @@ class ContactUpdater {
 
     try {
       // Initialize CiviCRM
-      if (!\Drupal::hasService('civicrm')) {
-        return ['' => t('CiviCRM not available')];
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      if (!$this->initializeCivicrm()) {
         return ['' => t('CiviCRM not available')];
       }
 
@@ -503,6 +544,16 @@ class ContactUpdater {
   public function isProductCivicrmEnabled($product) {
     $settings = $this->getProductSettings($product);
     return !empty($settings['enabled']);
+  }
+
+  /**
+   * Initializes CiviCRM and returns whether initialization was successful.
+   *
+   * @return bool
+   *   TRUE if CiviCRM was successfully initialized, FALSE otherwise.
+   */
+  private function initializeCivicrm() {
+    return $this->civicrmInitializer->initialize();
   }
 
 }

@@ -17,13 +17,23 @@ class CivicrmHelper {
   protected $logger;
 
   /**
+   * The CiviCRM initializer service.
+   *
+   * @var \Drupal\commerce_civicrm\Service\CivicrmInitializer
+   */
+  protected $civicrmInitializer;
+
+  /**
    * Constructs a CivicrmHelper object.
    *
    * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $logger_factory
    *   The logger factory.
+   * @param \Drupal\commerce_civicrm\Service\CivicrmInitializer $civicrm_initializer
+   *   The CiviCRM initializer service.
    */
-  public function __construct(LoggerChannelFactoryInterface $logger_factory) {
+  public function __construct(LoggerChannelFactoryInterface $logger_factory, CivicrmInitializer $civicrm_initializer) {
     $this->logger = $logger_factory->get('commerce_civicrm');
+    $this->civicrmInitializer = $civicrm_initializer;
   }
 
   /**
@@ -33,29 +43,7 @@ class CivicrmHelper {
    *   TRUE if CiviCRM is available, FALSE otherwise.
    */
   public function isAvailable() {
-    try {
-      // Initialize CiviCRM
-      if (!\Drupal::hasService('civicrm')) {
-        return FALSE;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
-        return FALSE;
-      }
-
-      // Test with a simple API call to verify CiviCRM is working
-      $result = \Civi\Api4\Contact::get(FALSE)
-        ->setLimit(1)
-        ->execute();
-      
-      return TRUE;
-    } catch (\Exception $e) {
-      $this->logger->error('CiviCRM availability check failed: @message', [
-        '@message' => $e->getMessage(),
-      ]);
-      return FALSE;
-    }
+    return $this->civicrmInitializer->isAvailable();
   }
 
   /**
@@ -67,12 +55,7 @@ class CivicrmHelper {
   public function getSystemInfo() {
     try {
       // Initialize CiviCRM
-      if (!\Drupal::hasService('civicrm')) {
-        return [];
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      if (!$this->civicrmInitializer->initialize()) {
         return [];
       }
 

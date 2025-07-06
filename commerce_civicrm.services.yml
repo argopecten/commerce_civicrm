@@ -35,6 +35,7 @@ services:
     arguments: 
       - '@entity_type.manager'
       - '@logger.factory'
+      - '@commerce_civicrm.civicrm_initializer'
     tags:
       - { name: service }
 
@@ -44,6 +45,7 @@ services:
     arguments:
       - '@entity_type.manager'
       - '@logger.factory'
+      - '@commerce_civicrm.civicrm_initializer'
     tags:
       - { name: service }
 
@@ -53,12 +55,22 @@ services:
     arguments:
       - '@entity_type.manager'
       - '@logger.factory'
+      - '@commerce_civicrm.civicrm_initializer'
     tags:
       - { name: service }
 
   # Service for CiviCRM helper functions and availability checks
   commerce_civicrm.civicrm_helper:
     class: Drupal\commerce_civicrm\Service\CivicrmHelper
+    arguments:
+      - '@logger.factory'
+      - '@commerce_civicrm.civicrm_initializer'
+    tags:
+      - { name: service }
+
+  # Service for initializing CiviCRM for API operations
+  commerce_civicrm.civicrm_initializer:
+    class: Drupal\commerce_civicrm\Service\CivicrmInitializer
     arguments:
       - '@logger.factory'
     tags:

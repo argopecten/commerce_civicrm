@@ -6,6 +6,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_payment\Entity\PaymentInterface;
+use Drupal\commerce_civicrm\CivicrmInitializer;
 
 /**
  * Service for updating CiviCRM contributions based on Commerce Order data.
@@ -27,16 +28,36 @@ class ContributionUpdater {
   protected $logger;
 
   /**
+   * The CiviCRM initializer service.
+   *
+   * @var \Drupal\commerce_civicrm\Service\CivicrmInitializer
+   */
+  protected $civicrmInitializer;
+
+  /**
    * Constructs a ContributionUpdater object.
    *
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entity_type_manager
    *   The entity type manager.
    * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $logger_factory
    *   The logger factory.
+   * @param \Drupal\commerce_civicrm\Service\CivicrmInitializer $civicrm_initializer
+   *   The CiviCRM initializer service.
    */
-  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory) {
+  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory, CivicrmInitializer $civicrm_initializer) {
     $this->entityTypeManager = $entity_type_manager;
     $this->logger = $logger_factory->get('commerce_civicrm');
+    $this->civicrmInitializer = $civicrm_initializer;
+  }
+
+  /**
+   * Initializes CiviCRM for API operations.
+   *
+   * @return bool
+   *   TRUE if CiviCRM is successfully initialized, FALSE otherwise.
+   */
+  private function initializeCivicrm() {
+    return $this->civicrmInitializer->initialize();
   }
 
   /**
@@ -139,13 +160,8 @@ class ContributionUpdater {
    */
   protected function findExistingContribution(OrderInterface $order) {
     try {
-      // Initialize CiviCRM first
-      if (!\Drupal::hasService('civicrm')) {
-        return NULL;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      // Initialize CiviCRM
+      if (!$this->initializeCivicrm()) {
         return NULL;
       }
       
@@ -179,13 +195,8 @@ class ContributionUpdater {
    */
   protected function createContribution(array $contribution_data) {
     try {
-      // Initialize CiviCRM first
-      if (!\Drupal::hasService('civicrm')) {
-        return NULL;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      // Initialize CiviCRM
+      if (!$this->initializeCivicrm()) {
         return NULL;
       }
       
@@ -217,13 +228,8 @@ class ContributionUpdater {
    */
   protected function getFinancialTypeId() {
     try {
-      // Initialize CiviCRM first
-      if (!\Drupal::hasService('civicrm')) {
-        return NULL;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      // Initialize CiviCRM
+      if (!$this->initializeCivicrm()) {
         return NULL;
       }
       
@@ -268,13 +274,8 @@ class ContributionUpdater {
    */
   protected function getContributionStatusId(OrderInterface $order) {
     try {
-      // Initialize CiviCRM first
-      if (!\Drupal::hasService('civicrm')) {
-        return NULL;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      // Initialize CiviCRM
+      if (!$this->initializeCivicrm()) {
         return NULL;
       }
       
@@ -368,13 +369,8 @@ class ContributionUpdater {
    */
   protected function getPaymentInstrumentId($gateway_plugin_id) {
     try {
-      // Initialize CiviCRM first
-      if (!\Drupal::hasService('civicrm')) {
-        return NULL;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      // Initialize CiviCRM
+      if (!$this->initializeCivicrm()) {
         return NULL;
       }
       

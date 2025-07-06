@@ -5,6 +5,7 @@ namespace Drupal\commerce_civicrm\Service;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Drupal\commerce_order\Entity\OrderInterface;
+use Drupal\commerce_product\Entity\ProductInterface;
 use Drupal\commerce_order\Entity\OrderItemInterface;
 
 /**
@@ -27,16 +28,26 @@ class EventUpdater {
   protected $logger;
 
   /**
+   * The CiviCRM initializer service.
+   *
+   * @var \Drupal\commerce_civicrm\Service\CivicrmInitializer
+   */
+  protected $civicrmInitializer;
+
+  /**
    * Constructs an EventUpdater object.
    *
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entity_type_manager
    *   The entity type manager.
    * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $logger_factory
    *   The logger factory.
+   * @param \Drupal\commerce_civicrm\Service\CivicrmInitializer $civicrm_initializer
+   *   The CiviCRM initializer service.
    */
-  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory) {
+  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory, CivicrmInitializer $civicrm_initializer) {
     $this->entityTypeManager = $entity_type_manager;
     $this->logger = $logger_factory->get('commerce_civicrm');
+    $this->civicrmInitializer = $civicrm_initializer;
   }
 
   /**
@@ -172,12 +183,7 @@ class EventUpdater {
   protected function findEventByTitle($title) {
     try {
       // Initialize CiviCRM first
-      if (!\Drupal::hasService('civicrm')) {
-        return NULL;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      if (!$this->initializeCivicrm()) {
         return NULL;
       }
       
@@ -216,12 +222,7 @@ class EventUpdater {
   protected function findExistingParticipant($event_id, $contact_id, OrderInterface $order) {
     try {
       // Initialize CiviCRM first
-      if (!\Drupal::hasService('civicrm')) {
-        return NULL;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      if (!$this->initializeCivicrm()) {
         return NULL;
       }
       
@@ -263,12 +264,7 @@ class EventUpdater {
   protected function createEventRegistration($event_id, $contact_id, OrderItemInterface $order_item, OrderInterface $order) {
     try {
       // Initialize CiviCRM first
-      if (!\Drupal::hasService('civicrm')) {
-        return NULL;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      if (!$this->initializeCivicrm()) {
         return NULL;
       }
       
@@ -318,12 +314,7 @@ class EventUpdater {
   protected function getParticipantStatusId($status_name) {
     try {
       // Initialize CiviCRM first
-      if (!\Drupal::hasService('civicrm')) {
-        return NULL;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      if (!$this->initializeCivicrm()) {
         return NULL;
       }
       
@@ -357,13 +348,8 @@ class EventUpdater {
    */
   protected function getParticipantRoleId($role_name) {
     try {
-      // Initialize CiviCRM first
-      if (!\Drupal::hasService('civicrm')) {
-        return NULL;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      // Initialize CiviCRM
+      if (!$this->initializeCivicrm()) {
         return NULL;
       }
       
@@ -399,13 +385,8 @@ class EventUpdater {
    */
   public function updateEventRegistration($participant_id, array $participant_data) {
     try {
-      // Initialize CiviCRM first
-      if (!\Drupal::hasService('civicrm')) {
-        return FALSE;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
+      // Initialize CiviCRM
+      if (!$this->initializeCivicrm()) {
         return FALSE;
       }
       
@@ -428,6 +409,16 @@ class EventUpdater {
     }
     
     return FALSE;
+  }
+
+  /**
+   * Initializes CiviCRM and returns whether initialization was successful.
+   *
+   * @return bool
+   *   TRUE if CiviCRM was successfully initialized, FALSE otherwise.
+   */
+  private function initializeCivicrm() {
+    return $this->civicrmInitializer->initialize();
   }
 
 }

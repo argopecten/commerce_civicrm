@@ -2,13 +2,14 @@
 
 namespace Drupal\commerce_civicrm\Plugin\RulesAction;
 
+use Drupal\Core\Form\FormStateInterface;
 use Drupal\rules\Core\RulesActionBase;
-use Drupal\user\UserInterface;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
-use Drupal\Core\StringTranslation\StringTranslationTrait;
-use Drupal\commerce_civicrm\Service\ContactUpdater;
-use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
+use Psr\Log\LoggerInterface;
+use Drupal\user\UserInterface;
+use Drupal\commerce_civicrm\Service\ContactUpdater;
+use Drupal\Core\StringTranslation\StringTranslationTrait;
 
 /**
  * Provides a 'Add a CiviCRM Membership' action.
@@ -50,6 +51,13 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
   protected $contactUpdater;
 
   /**
+   * The CiviCRM initializer service.
+   *
+   * @var \Drupal\commerce_civicrm\Service\CivicrmInitializer
+   */
+  protected $civicrmInitializer;
+
+  /**
    * Constructs a CiviCrmAddMembership object.
    *
    * @param array $configuration
@@ -62,11 +70,14 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
    *   The logger service.
    * @param \Drupal\commerce_civicrm\Service\ContactUpdater $contact_updater
    *   The contact updater service.
+   * @param \Drupal\commerce_civicrm\Service\CivicrmInitializer $civicrm_initializer
+   *   The CiviCRM initializer service.
    */
-  public function __construct(array $configuration, $plugin_id, $plugin_definition, LoggerInterface $logger, ContactUpdater $contact_updater) {
+  public function __construct(array $configuration, $plugin_id, $plugin_definition, LoggerInterface $logger, ContactUpdater $contact_updater, CivicrmInitializer $civicrm_initializer) {
     parent::__construct($configuration, $plugin_id, $plugin_definition);
     $this->logger = $logger;
     $this->contactUpdater = $contact_updater;
+    $this->civicrmInitializer = $civicrm_initializer;
   }
 
   /**
@@ -78,7 +89,8 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
       $plugin_id,
       $plugin_definition,
       $container->get('logger.factory')->get('commerce_civicrm'),
-      $container->get('commerce_civicrm.contact_updater')
+      $container->get('commerce_civicrm.contact_updater'),
+      $container->get('commerce_civicrm.civicrm_initializer')
     );
   }
 
@@ -104,14 +116,7 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
     // Create the membership using CiviCRM API
     try {
       // Initialize CiviCRM first
-      if (!\Drupal::hasService('civicrm')) {
-        $this->logger->error('CiviCRM service not available');
-        return;
-      }
-      
-      $civicrm = \Drupal::service('civicrm');
-      if (!$civicrm->initialize()) {
-        $this->logger->error('Failed to initialize CiviCRM');
+      if (!$this->initializeCivicrm()) {
         return;
       }
       
@@ -142,6 +147,16 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
         '@message' => $e->getMessage(),
       ]);
     }
+  }
+
+  /**
+   * Initializes CiviCRM for API operations.
+   *
+   * @return bool
+   *   TRUE if CiviCRM is successfully initialized, FALSE otherwise.
+   */
+  private function initializeCivicrm() {
+    return $this->civicrmInitializer->initialize();
   }
 
 }
