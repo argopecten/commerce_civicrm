@@ -134,24 +134,33 @@ class ContactUpdater {
    */
   protected function findExistingContact(array $contact_data) {
     try {
-      $api = $this->civicrmTools->getApi();
+      // Initialize CiviCRM first
+      if (!\Drupal::hasService('civicrm')) {
+        return NULL;
+      }
       
-      // First try to find by email
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return NULL;
+      }
+      
+      // First try to find by email using Email entity directly
       if (!empty($contact_data['email'])) {
-        $result = $api->Contact->get(FALSE)
-          ->addSelect('id')
-          ->addWhere('email_primary.email', '=', $contact_data['email'])
+        $email_result = \Civi\Api4\Email::get(FALSE)
+          ->addSelect('contact_id')
+          ->addWhere('email', '=', $contact_data['email'])
+          ->addWhere('is_primary', '=', TRUE)
           ->setLimit(1)
           ->execute();
         
-        if ($result->count() > 0) {
-          return $result->first()['id'];
+        if ($email_result->count() > 0) {
+          return $email_result->first()['contact_id'];
         }
       }
       
       // If no email match, try by first and last name
       if (!empty($contact_data['first_name']) && !empty($contact_data['last_name'])) {
-        $result = $api->Contact->get(FALSE)
+        $result = \Civi\Api4\Contact::get(FALSE)
           ->addSelect('id')
           ->addWhere('first_name', '=', $contact_data['first_name'])
           ->addWhere('last_name', '=', $contact_data['last_name'])
@@ -184,14 +193,22 @@ class ContactUpdater {
    */
   protected function updateExistingContact($contact_id, array $contact_data) {
     try {
-      $api = $this->civicrmTools->getApi();
+      // Initialize CiviCRM first
+      if (!\Drupal::hasService('civicrm')) {
+        return NULL;
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return NULL;
+      }
       
       // Remove email from contact data as it's handled separately
       $email = $contact_data['email'] ?? NULL;
       unset($contact_data['email']);
       
       // Update the contact
-      $result = $api->Contact->update(FALSE)
+      $result = \Civi\Api4\Contact::update(FALSE)
         ->addValue('id', $contact_id)
         ->setValues($contact_data)
         ->execute();
@@ -229,14 +246,22 @@ class ContactUpdater {
    */
   protected function createNewContact(array $contact_data) {
     try {
-      $api = $this->civicrmTools->getApi();
+      // Initialize CiviCRM first
+      if (!\Drupal::hasService('civicrm')) {
+        return NULL;
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return NULL;
+      }
       
       // Remove email from contact data as it's handled separately
       $email = $contact_data['email'] ?? NULL;
       unset($contact_data['email']);
       
       // Create the contact
-      $result = $api->Contact->create(FALSE)
+      $result = \Civi\Api4\Contact::create(FALSE)
         ->setValues($contact_data)
         ->execute();
       
@@ -272,10 +297,18 @@ class ContactUpdater {
    */
   protected function updateContactEmail($contact_id, $email) {
     try {
-      $api = $this->civicrmTools->getApi();
+      // Initialize CiviCRM first
+      if (!\Drupal::hasService('civicrm')) {
+        return;
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return;
+      }
       
       // Check if email already exists for this contact
-      $existing_email = $api->Email->get(FALSE)
+      $existing_email = \Civi\Api4\Email::get(FALSE)
         ->addSelect('id')
         ->addWhere('contact_id', '=', $contact_id)
         ->addWhere('is_primary', '=', TRUE)
@@ -284,13 +317,13 @@ class ContactUpdater {
       
       if ($existing_email->count() > 0) {
         // Update existing email
-        $api->Email->update(FALSE)
+        \Civi\Api4\Email::update(FALSE)
           ->addValue('id', $existing_email->first()['id'])
           ->addValue('email', $email)
           ->execute();
       } else {
         // Create new email
-        $api->Email->create(FALSE)
+        \Civi\Api4\Email::create(FALSE)
           ->addValue('contact_id', $contact_id)
           ->addValue('email', $email)
           ->addValue('is_primary', TRUE)

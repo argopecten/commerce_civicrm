@@ -171,8 +171,14 @@ class EventUpdater {
    */
   protected function findEventByTitle($title) {
     try {
-      if (!class_exists('\Civi\Api4\Event')) {
-        \Drupal::service('civicrm')->initialize();
+      // Initialize CiviCRM first
+      if (!\Drupal::hasService('civicrm')) {
+        return NULL;
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return NULL;
       }
       
       $result = \Civi\Api4\Event::get(FALSE)
@@ -209,8 +215,14 @@ class EventUpdater {
    */
   protected function findExistingParticipant($event_id, $contact_id, OrderInterface $order) {
     try {
-      if (!class_exists('\Civi\Api4\Participant')) {
-        \Drupal::service('civicrm')->initialize();
+      // Initialize CiviCRM first
+      if (!\Drupal::hasService('civicrm')) {
+        return NULL;
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return NULL;
       }
       
       $result = \Civi\Api4\Participant::get(FALSE)
@@ -250,8 +262,14 @@ class EventUpdater {
    */
   protected function createEventRegistration($event_id, $contact_id, OrderItemInterface $order_item, OrderInterface $order) {
     try {
-      if (!class_exists('\Civi\Api4\Participant')) {
-        \Drupal::service('civicrm')->initialize();
+      // Initialize CiviCRM first
+      if (!\Drupal::hasService('civicrm')) {
+        return NULL;
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return NULL;
       }
       
       // Prepare participant data
@@ -299,8 +317,14 @@ class EventUpdater {
    */
   protected function getParticipantStatusId($status_name) {
     try {
-      if (!class_exists('\Civi\Api4\OptionValue')) {
-        \Drupal::service('civicrm')->initialize();
+      // Initialize CiviCRM first
+      if (!\Drupal::hasService('civicrm')) {
+        return NULL;
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return NULL;
       }
       
       $result = \Civi\Api4\OptionValue::get(FALSE)
@@ -333,8 +357,14 @@ class EventUpdater {
    */
   protected function getParticipantRoleId($role_name) {
     try {
-      if (!class_exists('\Civi\Api4\OptionValue')) {
-        \Drupal::service('civicrm')->initialize();
+      // Initialize CiviCRM first
+      if (!\Drupal::hasService('civicrm')) {
+        return NULL;
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return NULL;
       }
       
       $result = \Civi\Api4\OptionValue::get(FALSE)
@@ -369,8 +399,14 @@ class EventUpdater {
    */
   public function updateEventRegistration($participant_id, array $participant_data) {
     try {
-      if (!class_exists('\Civi\Api4\Participant')) {
-        \Drupal::service('civicrm')->initialize();
+      // Initialize CiviCRM first
+      if (!\Drupal::hasService('civicrm')) {
+        return FALSE;
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return FALSE;
       }
       
       $result = \Civi\Api4\Participant::update(FALSE)

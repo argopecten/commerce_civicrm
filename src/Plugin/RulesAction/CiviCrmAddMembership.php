@@ -103,8 +103,16 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
 
     // Create the membership using CiviCRM API
     try {
-      if (!class_exists('\Civi\Api4\Membership')) {
-        \Drupal::service('civicrm')->initialize();
+      // Initialize CiviCRM first
+      if (!\Drupal::hasService('civicrm')) {
+        $this->logger->error('CiviCRM service not available');
+        return;
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        $this->logger->error('Failed to initialize CiviCRM');
+        return;
       }
       
       $result = \Civi\Api4\Membership::create(FALSE)

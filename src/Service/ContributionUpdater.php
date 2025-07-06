@@ -139,8 +139,14 @@ class ContributionUpdater {
    */
   protected function findExistingContribution(OrderInterface $order) {
     try {
-      if (!class_exists('\Civi\Api4\Contribution')) {
-        \Drupal::service('civicrm')->initialize();
+      // Initialize CiviCRM first
+      if (!\Drupal::hasService('civicrm')) {
+        return NULL;
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return NULL;
       }
       
       // Search by source field containing the order ID
@@ -173,8 +179,14 @@ class ContributionUpdater {
    */
   protected function createContribution(array $contribution_data) {
     try {
-      if (!class_exists('\Civi\Api4\Contribution')) {
-        \Drupal::service('civicrm')->initialize();
+      // Initialize CiviCRM first
+      if (!\Drupal::hasService('civicrm')) {
+        return NULL;
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return NULL;
       }
       
       $result = \Civi\Api4\Contribution::create(FALSE)
@@ -205,8 +217,14 @@ class ContributionUpdater {
    */
   protected function getFinancialTypeId() {
     try {
-      if (!class_exists('\Civi\Api4\FinancialType')) {
-        \Drupal::service('civicrm')->initialize();
+      // Initialize CiviCRM first
+      if (!\Drupal::hasService('civicrm')) {
+        return NULL;
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return NULL;
       }
       
       // Try to get "Donation" financial type first, fallback to first available
@@ -250,8 +268,14 @@ class ContributionUpdater {
    */
   protected function getContributionStatusId(OrderInterface $order) {
     try {
-      if (!class_exists('\Civi\Api4\OptionValue')) {
-        \Drupal::service('civicrm')->initialize();
+      // Initialize CiviCRM first
+      if (!\Drupal::hasService('civicrm')) {
+        return NULL;
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return NULL;
       }
       
       // Map order states to contribution statuses
@@ -344,8 +368,14 @@ class ContributionUpdater {
    */
   protected function getPaymentInstrumentId($gateway_plugin_id) {
     try {
-      if (!class_exists('\Civi\Api4\OptionValue')) {
-        \Drupal::service('civicrm')->initialize();
+      // Initialize CiviCRM first
+      if (!\Drupal::hasService('civicrm')) {
+        return NULL;
+      }
+      
+      $civicrm = \Drupal::service('civicrm');
+      if (!$civicrm->initialize()) {
+        return NULL;
       }
       
       // Map common payment gateways to CiviCRM payment instruments
