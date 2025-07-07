@@ -48,12 +48,9 @@ class CivicrmInitializer {
       
       // Initialize CiviCRM bootstrap
       \Drupal::service('civicrm')->initialize();
-      if (!\Drupal::service('civicrm')->initialize()) {
-        $this->logger->error('Failed to initialize CiviCRM');
-        return FALSE;
-      }
-      
+      $this->logger->info('CiviCRM initialized successfully');      
       return TRUE;
+      
     } catch (\Exception $e) {
       $this->logger->error('Exception while initializing CiviCRM: @message', [
         '@message' => $e->getMessage(),

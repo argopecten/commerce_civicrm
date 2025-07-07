@@ -273,9 +273,11 @@ class ContactUpdater {
       $email = $contact_data['email'] ?? NULL;
       unset($contact_data['email']);
       
+      // Add the ID to the contact data for the update
+      $contact_data['id'] = $contact_id;
+      
       // Update the contact
       $result = \Civi\Api4\Contact::update(FALSE)
-        ->addValue('id', $contact_id)
         ->setValues($contact_data)
         ->execute();
       

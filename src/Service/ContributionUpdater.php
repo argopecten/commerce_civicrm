@@ -6,7 +6,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_payment\Entity\PaymentInterface;
-use Drupal\commerce_civicrm\CivicrmInitializer;
+use Drupal\commerce_civicrm\Service\CivicrmInitializer;
 
 /**
  * Service for updating CiviCRM contributions based on Commerce Order data.
