@@ -8,7 +8,7 @@ use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_product\Entity\ProductInterface;
 use Drupal\profile\Entity\ProfileInterface;
 use Drupal\user\UserInterface;
-use Drupal\commerce_civicrm\Service\CivicrmInitializer;
+use Drupal\commerce_civicrm\Service\CivicrmHelper;
 
 /**
  * Service for updating CiviCRM contacts based on Commerce Order data.
@@ -30,11 +30,11 @@ class ContactUpdater {
   protected $logger;
 
   /**
-   * The CiviCRM initializer service.
+   * The CiviCRM helper service.
    *
-   * @var \Drupal\commerce_civicrm\Service\CivicrmInitializer
+   * @var \Drupal\commerce_civicrm\Service\CivicrmHelper
    */
-  protected $civicrmInitializer;
+  protected $civicrmHelper;
 
   /**
    * Constructs a ContactUpdater object.
@@ -43,13 +43,13 @@ class ContactUpdater {
    *   The entity type manager.
    * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $logger_factory
    *   The logger factory.
-   * @param \Drupal\commerce_civicrm\Service\CivicrmInitializer $civicrm_initializer
-   *   The CiviCRM initializer service.
+   * @param \Drupal\commerce_civicrm\Service\CivicrmHelper $civicrm_helper
+   *   The CiviCRM helper service.
    */
-  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory, CivicrmInitializer $civicrm_initializer) {
+  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory, CivicrmHelper $civicrm_helper) {
     $this->entityTypeManager = $entity_type_manager;
     $this->logger = $logger_factory->get('commerce_civicrm');
-    $this->civicrmInitializer = $civicrm_initializer;
+    $this->civicrmHelper = $civicrm_helper;
   }
 
   /**
@@ -433,44 +433,6 @@ class ContactUpdater {
   }
 
   /**
-   * Gets available CiviCRM membership types.
-   *
-   * @return array
-   *   Array of membership type options keyed by ID.
-   */
-  public function getMembershipTypes() {
-    $options = [];
-
-    try {
-      // Initialize CiviCRM
-      if (!$this->initializeCivicrm()) {
-        return ['' => t('CiviCRM not available')];
-      }
-
-      $result = \Civi\Api4\MembershipType::get(FALSE)
-        ->addWhere('is_active', '=', TRUE)
-        ->addOrderBy('name', 'ASC')
-        ->setLimit(0)
-        ->execute();
-
-      foreach ($result as $type) {
-        $options[$type['id']] = $type['name'];
-      }
-
-      if (empty($options)) {
-        $options[''] = t('No active membership types found');
-      }
-    } catch (\Exception $e) {
-      $this->logger->error('Failed to retrieve CiviCRM Membership Types: @error', [
-        '@error' => $e->getMessage(),
-      ]);
-      $options[''] = t('Error loading membership types');
-    }
-
-    return $options;
-  }
-
-  /**
    * Gets available CiviCRM financial types.
    *
    * @return array
@@ -555,7 +517,7 @@ class ContactUpdater {
    *   TRUE if CiviCRM was successfully initialized, FALSE otherwise.
    */
   private function initializeCivicrm() {
-    return $this->civicrmInitializer->initialize();
+    return $this->civicrmHelper->initialize();
   }
 
 }

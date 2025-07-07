@@ -6,7 +6,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_payment\Entity\PaymentInterface;
-use Drupal\commerce_civicrm\Service\CivicrmInitializer;
+use Drupal\commerce_civicrm\Service\CivicrmHelper;
 
 /**
  * Service for updating CiviCRM contributions based on Commerce Order data.
@@ -28,11 +28,11 @@ class ContributionUpdater {
   protected $logger;
 
   /**
-   * The CiviCRM initializer service.
+   * The CiviCRM helper service.
    *
-   * @var \Drupal\commerce_civicrm\Service\CivicrmInitializer
+   * @var \Drupal\commerce_civicrm\Service\CivicrmHelper
    */
-  protected $civicrmInitializer;
+  protected $civicrmHelper;
 
   /**
    * Constructs a ContributionUpdater object.
@@ -41,13 +41,13 @@ class ContributionUpdater {
    *   The entity type manager.
    * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $logger_factory
    *   The logger factory.
-   * @param \Drupal\commerce_civicrm\Service\CivicrmInitializer $civicrm_initializer
-   *   The CiviCRM initializer service.
+   * @param \Drupal\commerce_civicrm\Service\CivicrmHelper $civicrm_helper
+   *   The CiviCRM helper service.
    */
-  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory, CivicrmInitializer $civicrm_initializer) {
+  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory, CivicrmHelper $civicrm_helper) {
     $this->entityTypeManager = $entity_type_manager;
     $this->logger = $logger_factory->get('commerce_civicrm');
-    $this->civicrmInitializer = $civicrm_initializer;
+    $this->civicrmHelper = $civicrm_helper;
   }
 
   /**
@@ -57,7 +57,7 @@ class ContributionUpdater {
    *   TRUE if CiviCRM is successfully initialized, FALSE otherwise.
    */
   private function initializeCivicrm() {
-    return $this->civicrmInitializer->initialize();
+    return $this->civicrmHelper->initialize();
   }
 
   /**

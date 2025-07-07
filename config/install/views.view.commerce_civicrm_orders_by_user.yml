@@ -189,6 +189,7 @@ display:
           field: state
           group_type: group
           operator: 'in'
+          value: {  }
           expose:
             operator_id: 'state_op'
             label: 'Order Status'
@@ -236,6 +237,7 @@ display:
             widget: select
             multiple: false
             default_group: ''
+          plugin_id: date
         total_price:
           id: total_price
           table: commerce_order
@@ -261,6 +263,7 @@ display:
             widget: select
             multiple: false
             default_group: ''
+          plugin_id: standard
   page_1:
     display_plugin: page
     id: page_1

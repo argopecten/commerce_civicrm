@@ -9,6 +9,8 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Drupal\user\UserInterface;
 use Drupal\commerce_civicrm\Service\ContactUpdater;
+use Drupal\commerce_civicrm\Service\MembershipUpdater;
+use Drupal\commerce_civicrm\Service\CivicrmHelper;
 use Drupal\Core\StringTranslation\StringTranslationTrait;
 
 /**
@@ -51,11 +53,18 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
   protected $contactUpdater;
 
   /**
-   * The CiviCRM initializer service.
+   * The membership updater service.
    *
-   * @var \Drupal\commerce_civicrm\Service\CivicrmInitializer
+   * @var \Drupal\commerce_civicrm\Service\MembershipUpdater
    */
-  protected $civicrmInitializer;
+  protected $membershipUpdater;
+
+  /**
+   * The CiviCRM helper service.
+   *
+   * @var \Drupal\commerce_civicrm\Service\CivicrmHelper
+   */
+  protected $civicrmHelper;
 
   /**
    * Constructs a CiviCrmAddMembership object.
@@ -70,14 +79,17 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
    *   The logger service.
    * @param \Drupal\commerce_civicrm\Service\ContactUpdater $contact_updater
    *   The contact updater service.
-   * @param \Drupal\commerce_civicrm\Service\CivicrmInitializer $civicrm_initializer
-   *   The CiviCRM initializer service.
+   * @param \Drupal\commerce_civicrm\Service\MembershipUpdater $membership_updater
+   *   The membership updater service.
+   * @param \Drupal\commerce_civicrm\Service\CivicrmHelper $civicrm_helper
+   *   The CiviCRM helper service.
    */
-  public function __construct(array $configuration, $plugin_id, $plugin_definition, LoggerInterface $logger, ContactUpdater $contact_updater, CivicrmInitializer $civicrm_initializer) {
+  public function __construct(array $configuration, $plugin_id, $plugin_definition, LoggerInterface $logger, ContactUpdater $contact_updater, MembershipUpdater $membership_updater, CivicrmHelper $civicrm_helper) {
     parent::__construct($configuration, $plugin_id, $plugin_definition);
     $this->logger = $logger;
     $this->contactUpdater = $contact_updater;
-    $this->civicrmInitializer = $civicrm_initializer;
+    $this->membershipUpdater = $membership_updater;
+    $this->civicrmHelper = $civicrm_helper;
   }
 
   /**
@@ -90,7 +102,8 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
       $plugin_definition,
       $container->get('logger.factory')->get('commerce_civicrm'),
       $container->get('commerce_civicrm.contact_updater'),
-      $container->get('commerce_civicrm.civicrm_initializer')
+      $container->get('commerce_civicrm.membership_updater'),
+      $container->get('commerce_civicrm.civicrm_helper')
     );
   }
 
@@ -113,36 +126,42 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
       return;
     }
 
-    // Create the membership using CiviCRM API
-    try {
-      // Initialize CiviCRM first
-      if (!$this->initializeCivicrm()) {
-        return;
+    // Create a dummy order for the membership updater
+    // In a real scenario, this would be called from an order context
+    $order = new class {
+      public function id() { return 'rules-action'; }
+      public function getState() { 
+        return new class {
+          public function getId() { return 'completed'; }
+        };
       }
+    };
+
+    $order_item = new class {
+      public function id() { return 'rules-action-item'; }
+    };
+
+    // Create the membership using the MembershipUpdater service
+    try {
+      $membership_id = $this->membershipUpdater->createMembershipFromOrder(
+        $contact_id,
+        $membership_type_id,
+        $order,
+        $order_item
+      );
       
-      $result = \Civi\Api4\Membership::create(FALSE)
-        ->setValues([
-          'contact_id' => $contact_id,
-          'membership_type_id' => $membership_type_id,
-          'source' => 'Drupal Commerce via Rules',
-          'join_date' => date('Y-m-d'),
-          'status_id' => 'New',
-        ])
-        ->execute();
-      
-      if ($result->count() > 0) {
-        $membership_id = $result->first()['id'];
-        $this->logger->info('Successfully created/renewed CiviCRM membership @membership_id for contact @contact_id', [
+      if ($membership_id) {
+        $this->logger->info('Successfully created/renewed CiviCRM membership @membership_id for contact @contact_id via Rules action', [
           '@membership_id' => $membership_id,
           '@contact_id' => $contact_id,
         ]);
       } else {
-        $this->logger->error('Failed to create CiviCRM membership for contact @contact_id: No result returned', [
+        $this->logger->error('Failed to create CiviCRM membership for contact @contact_id via Rules action', [
           '@contact_id' => $contact_id,
         ]);
       }
     } catch (\Exception $e) {
-      $this->logger->error('Failed to create CiviCRM membership for contact @contact_id: @message', [
+      $this->logger->error('Failed to create CiviCRM membership for contact @contact_id via Rules action: @message', [
         '@contact_id' => $contact_id,
         '@message' => $e->getMessage(),
       ]);
@@ -156,7 +175,7 @@ class CiviCrmAddMembership extends RulesActionBase implements ContainerFactoryPl
    *   TRUE if CiviCRM is successfully initialized, FALSE otherwise.
    */
   private function initializeCivicrm() {
-    return $this->civicrmInitializer->initialize();
+    return $this->civicrmHelper->initialize();
   }
 
 }

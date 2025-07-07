@@ -28,7 +28,8 @@ function commerce_civicrm_help($route_name, RouteMatchInterface $route_match) {
       $output .= '<li>' . t('Automatic contact creation and synchronization from Commerce customer profiles') . '</li>';
       $output .= '<li>' . t('Contribution tracking with customizable financial types') . '</li>';
       $output .= '<li>' . t('Membership management with automatic creation and renewal') . '</li>';
-      $output .= '<li>' . t('Event participation tracking') . '</li>';
+      $output .= '<li>' . t('Event registration with customizable participant roles') . '</li>';
+      $output .= '<li>' . t('Mailing list subscription with double opt-in and welcome messages') . '</li>';
       $output .= '<li>' . t('Rules integration for advanced workflow automation') . '</li>';
       $output .= '<li>' . t('Views integration for displaying customer orders') . '</li>';
       $output .= '</ul>';
@@ -46,8 +47,9 @@ function commerce_civicrm_help($route_name, RouteMatchInterface $route_match) {
       $output .= '<ol>';
       $output .= '<li>' . t('The required "field_civicrm" field is automatically added to all Commerce product types during module installation.') . '</li>';
       $output .= '<li>' . t('Edit any Commerce product to configure CiviCRM integration in the "CiviCRM Integration" section.') . '</li>';
-      $output .= '<li>' . t('Choose whether to create contributions or memberships when the product is purchased.') . '</li>';
-      $output .= '<li>' . t('Select the appropriate CiviCRM financial type (for contributions) or membership type (for memberships).') . '</li>';
+      $output .= '<li>' . t('Choose whether to create contributions, memberships, event registrations, or mailing subscriptions when the product is purchased.') . '</li>';
+      $output .= '<li>' . t('Select the appropriate CiviCRM entity (Financial Type, Membership Type, Event, or Mailing Group).') . '</li>';
+      $output .= '<li>' . t('Configure additional options like participant roles for events or mailing preferences.') . '</li>';
       $output .= '<li>' . t('Configure Rules for advanced automation workflows if needed.') . '</li>';
       $output .= '</ol>';
       
@@ -55,7 +57,11 @@ function commerce_civicrm_help($route_name, RouteMatchInterface $route_match) {
       $output .= '<p>' . t('Once configured, the integration works automatically:') . '</p>';
       $output .= '<ul>';
       $output .= '<li>' . t('When customers place orders, CiviCRM contacts are created or updated from customer profiles.') . '</li>';
-      $output .= '<li>' . t('When orders are completed, CiviCRM contributions or memberships are created based on product configuration.') . '</li>';
+      $output .= '<li>' . t('When orders are completed, CiviCRM records are created based on product configuration:') . '</li>';
+      $output .= '<li>' . t('&nbsp;&nbsp;• <strong>Contributions:</strong> Financial records with specified financial types') . '</li>';
+      $output .= '<li>' . t('&nbsp;&nbsp;• <strong>Memberships:</strong> Membership records with specified types and durations') . '</li>';
+      $output .= '<li>' . t('&nbsp;&nbsp;• <strong>Events:</strong> Event registrations with customizable participant roles') . '</li>';
+      $output .= '<li>' . t('&nbsp;&nbsp;• <strong>Mailings:</strong> Mailing list subscriptions with optional double opt-in and welcome messages') . '</li>';
       $output .= '<li>' . t('All CiviCRM operations are logged for debugging and audit purposes.') . '</li>';
       $output .= '<li>' . t('Use the "My CiviCRM Orders" view to let customers see their order history.') . '</li>';
       $output .= '</ul>';
@@ -65,6 +71,8 @@ function commerce_civicrm_help($route_name, RouteMatchInterface $route_match) {
       $output .= '<ul>';
       $output .= '<li>' . t('<strong>Add a CiviCRM Contribution:</strong> Create contributions with custom financial types') . '</li>';
       $output .= '<li>' . t('<strong>Add a CiviCRM Membership:</strong> Create or renew memberships with specific types') . '</li>';
+      $output .= '<li>' . t('<strong>Add a CiviCRM Event Registration:</strong> Register users for events with participant roles') . '</li>';
+      $output .= '<li>' . t('<strong>Add to CiviCRM Mailing Group:</strong> Subscribe users to mailing groups with preferences') . '</li>';
       $output .= '</ul>';
       
       $output .= '<h3>' . t('Troubleshooting') . '</h3>';
@@ -129,6 +137,8 @@ function commerce_civicrm_form_commerce_product_form_alter(&$form, FormStateInte
     '#options' => [
       'contribution' => t('Contribution (Donation)'),
       'membership' => t('Membership'),
+      'event' => t('Event Registration'),
+      'mailing' => t('Mailing List Subscription'),
     ],
     '#default_value' => $civicrm_settings['entity'],
     '#states' => [
@@ -170,6 +180,73 @@ function commerce_civicrm_form_commerce_product_form_alter(&$form, FormStateInte
     ],
   ];
 
+  // Add event selection.
+  $event_options = _commerce_civicrm_get_events();
+  $form['civicrm']['event_id'] = [
+    '#type' => 'select',
+    '#title' => t('CiviCRM Event'),
+    '#description' => t('Select the event for which to register participants when this product is purchased.'),
+    '#options' => $event_options,
+    '#default_value' => $civicrm_settings['entity_id'],
+    '#states' => [
+      'visible' => [
+        ':input[name="civicrm[enabled]"]' => ['checked' => TRUE],
+        ':input[name="civicrm[entity]"]' => ['value' => 'event'],
+      ],
+    ],
+  ];
+
+  // Add participant role selection for events.
+  $participant_role_options = _commerce_civicrm_get_participant_roles();
+  $form['civicrm']['participant_role_id'] = [
+    '#type' => 'select',
+    '#title' => t('Participant Role'),
+    '#description' => t('Select the role for event participants.'),
+    '#options' => $participant_role_options,
+    '#default_value' => $civicrm_settings['participant_role_id'] ?? '',
+    '#states' => [
+      'visible' => [
+        ':input[name="civicrm[enabled]"]' => ['checked' => TRUE],
+        ':input[name="civicrm[entity]"]' => ['value' => 'event'],
+      ],
+    ],
+  ];
+
+  // Add mailing group selection.
+  $mailing_options = _commerce_civicrm_get_mailing_groups();
+  $form['civicrm']['mailing_group_id'] = [
+    '#type' => 'select',
+    '#title' => t('CiviCRM Mailing Group'),
+    '#description' => t('Select the mailing group to add contacts to when this product is purchased.'),
+    '#options' => $mailing_options,
+    '#default_value' => $civicrm_settings['entity_id'],
+    '#states' => [
+      'visible' => [
+        ':input[name="civicrm[enabled]"]' => ['checked' => TRUE],
+        ':input[name="civicrm[entity]"]' => ['value' => 'mailing'],
+      ],
+    ],
+  ];
+
+  // Add mailing subscription preferences.
+  $form['civicrm']['mailing_preferences'] = [
+    '#type' => 'checkboxes',
+    '#title' => t('Mailing Preferences'),
+    '#description' => t('Select the subscription preferences for mailing list subscribers.'),
+    '#options' => [
+      'double_opt_in' => t('Require double opt-in confirmation'),
+      'send_welcome' => t('Send welcome message'),
+      'update_existing' => t('Update existing subscribers'),
+    ],
+    '#default_value' => $civicrm_settings['mailing_preferences'] ?? [],
+    '#states' => [
+      'visible' => [
+        ':input[name="civicrm[enabled]"]' => ['checked' => TRUE],
+        ':input[name="civicrm[entity]"]' => ['value' => 'mailing'],
+      ],
+    ],
+  ];
+
   // Add custom submit handler to save the CiviCRM settings.
   array_unshift($form['actions']['submit']['#submit'], 'commerce_civicrm_product_form_submit');
 }
@@ -189,12 +266,27 @@ function commerce_civicrm_product_form_submit(&$form, FormStateInterface $form_s
   $civicrm_enabled = !empty($values['civicrm']['enabled']);
   $civicrm_entity = $values['civicrm']['entity'] ?? 'contribution';
   $civicrm_entity_id = NULL;
+  $additional_settings = [];
 
   if ($civicrm_enabled) {
-    if ($civicrm_entity === 'membership') {
-      $civicrm_entity_id = $values['civicrm']['membership_type'] ?? NULL;
-    } elseif ($civicrm_entity === 'contribution') {
-      $civicrm_entity_id = $values['civicrm']['contribution_type'] ?? NULL;
+    switch ($civicrm_entity) {
+      case 'membership':
+        $civicrm_entity_id = $values['civicrm']['membership_type'] ?? NULL;
+        break;
+        
+      case 'contribution':
+        $civicrm_entity_id = $values['civicrm']['contribution_type'] ?? NULL;
+        break;
+        
+      case 'event':
+        $civicrm_entity_id = $values['civicrm']['event_id'] ?? NULL;
+        $additional_settings['participant_role_id'] = $values['civicrm']['participant_role_id'] ?? NULL;
+        break;
+        
+      case 'mailing':
+        $civicrm_entity_id = $values['civicrm']['mailing_group_id'] ?? NULL;
+        $additional_settings['mailing_preferences'] = array_filter($values['civicrm']['mailing_preferences'] ?? []);
+        break;
     }
   }
 
@@ -204,6 +296,11 @@ function commerce_civicrm_product_form_submit(&$form, FormStateInterface $form_s
     'entity' => $civicrm_entity,
     'entity_id' => $civicrm_entity_id,
   ];
+
+  // Add additional settings if any.
+  if (!empty($additional_settings)) {
+    $settings = array_merge($settings, $additional_settings);
+  }
 
   $product->set('field_civicrm', json_encode($settings));
   // The main entity form submit handler will save the product.
@@ -264,8 +361,8 @@ function _commerce_civicrm_get_membership_types() {
   }
 
   try {
-    $contact_updater = \Drupal::service('commerce_civicrm.contact_updater');
-    return $contact_updater->getMembershipTypes();
+    $membership_updater = \Drupal::service('commerce_civicrm.membership_updater');
+    return $membership_updater->getMembershipTypes();
   }
   catch (\Exception $e) {
     \Drupal::logger('commerce_civicrm')->error('Failed to get membership types: @message', ['@message' => $e->getMessage()]);
@@ -291,5 +388,68 @@ function _commerce_civicrm_get_financial_types() {
   catch (\Exception $e) {
     \Drupal::logger('commerce_civicrm')->error('Failed to get financial types: @message', ['@message' => $e->getMessage()]);
     return ['' => t('Error loading financial types')];
+  }
+}
+
+/**
+ * Helper function to get CiviCRM events.
+ *
+ * @return array
+ *   Array of event options keyed by ID.
+ */
+function _commerce_civicrm_get_events() {
+  if (!_commerce_civicrm_is_available()) {
+    return ['' => t('CiviCRM not available')];
+  }
+
+  try {
+    $event_updater = \Drupal::service('commerce_civicrm.event_updater');
+    return $event_updater->getEvents();
+  }
+  catch (\Exception $e) {
+    \Drupal::logger('commerce_civicrm')->error('Failed to get events: @message', ['@message' => $e->getMessage()]);
+    return ['' => t('Error loading events')];
+  }
+}
+
+/**
+ * Helper function to get CiviCRM mailing groups.
+ *
+ * @return array
+ *   Array of mailing group options keyed by ID.
+ */
+function _commerce_civicrm_get_mailing_groups() {
+  if (!_commerce_civicrm_is_available()) {
+    return ['' => t('CiviCRM not available')];
+  }
+
+  try {
+    $mailing_updater = \Drupal::service('commerce_civicrm.mailing_updater');
+    return $mailing_updater->getMailingGroups();
+  }
+  catch (\Exception $e) {
+    \Drupal::logger('commerce_civicrm')->error('Failed to get mailing groups: @message', ['@message' => $e->getMessage()]);
+    return ['' => t('Error loading mailing groups')];
+  }
+}
+
+/**
+ * Helper function to get CiviCRM participant roles.
+ *
+ * @return array
+ *   Array of participant role options keyed by ID.
+ */
+function _commerce_civicrm_get_participant_roles() {
+  if (!_commerce_civicrm_is_available()) {
+    return ['' => t('CiviCRM not available')];
+  }
+
+  try {
+    $event_updater = \Drupal::service('commerce_civicrm.event_updater');
+    return $event_updater->getParticipantRoles();
+  }
+  catch (\Exception $e) {
+    \Drupal::logger('commerce_civicrm')->error('Failed to get participant roles: @message', ['@message' => $e->getMessage()]);
+    return ['' => t('Error loading participant roles')];
   }
 }

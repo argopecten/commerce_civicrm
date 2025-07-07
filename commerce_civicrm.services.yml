@@ -17,14 +17,16 @@ services:
   # Each updater service has access to:
   #   @entity_type.manager - For handling Drupal entities (orders, customers, etc.)
   #   @logger.factory - For logging operations and debugging
-  # The orchestrator service (order_civicrm_updater) receives all three updater services as dependencies,
+  # The orchestrator service (order_civicrm_updater) receives all five updater services as dependencies,
   # allowing it to coordinate the complete CiviCRM update process
   commerce_civicrm.order_civicrm_updater:
     class: Drupal\commerce_civicrm\Service\OrderCivicrmUpdater
     arguments:
       - '@commerce_civicrm.contact_updater'
       - '@commerce_civicrm.contribution_updater'
+      - '@commerce_civicrm.membership_updater'
       - '@commerce_civicrm.event_updater'
+      - '@commerce_civicrm.mailing_updater'
       - '@logger.factory'
     tags:
       - { name: service }
@@ -35,7 +37,7 @@ services:
     arguments: 
       - '@entity_type.manager'
       - '@logger.factory'
-      - '@commerce_civicrm.civicrm_initializer'
+      - '@commerce_civicrm.civicrm_helper'
     tags:
       - { name: service }
 
@@ -45,7 +47,7 @@ services:
     arguments:
       - '@entity_type.manager'
       - '@logger.factory'
-      - '@commerce_civicrm.civicrm_initializer'
+      - '@commerce_civicrm.civicrm_helper'
     tags:
       - { name: service }
 
@@ -55,22 +57,33 @@ services:
     arguments:
       - '@entity_type.manager'
       - '@logger.factory'
-      - '@commerce_civicrm.civicrm_initializer'
+      - '@commerce_civicrm.civicrm_helper'
     tags:
       - { name: service }
 
-  # Service for CiviCRM helper functions and availability checks
+  # Service for updating CiviCRM memberships based on Commerce Order data
+  commerce_civicrm.membership_updater:
+    class: Drupal\commerce_civicrm\Service\MembershipUpdater
+    arguments:
+      - '@entity_type.manager'
+      - '@logger.factory'
+      - '@commerce_civicrm.civicrm_helper'
+    tags:
+      - { name: service }
+
+  # Service for updating CiviCRM mailing groups based on Commerce Order data
+  commerce_civicrm.mailing_updater:
+    class: Drupal\commerce_civicrm\Service\MailingUpdater
+    arguments:
+      - '@entity_type.manager'
+      - '@logger.factory'
+      - '@commerce_civicrm.civicrm_helper'
+    tags:
+      - { name: service }
+
+  # Service for CiviCRM helper functions, initialization, and availability checks
   commerce_civicrm.civicrm_helper:
     class: Drupal\commerce_civicrm\Service\CivicrmHelper
-    arguments:
-      - '@logger.factory'
-      - '@commerce_civicrm.civicrm_initializer'
-    tags:
-      - { name: service }
-
-  # Service for initializing CiviCRM for API operations
-  commerce_civicrm.civicrm_initializer:
-    class: Drupal\commerce_civicrm\Service\CivicrmInitializer
     arguments:
       - '@logger.factory'
     tags:

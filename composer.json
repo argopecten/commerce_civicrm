@@ -1,0 +1,83 @@
+{
+  "name": "drupal/commerce_civicrm",
+  "description": "A Drupal module that provides seamless integration between Drupal Commerce and CiviCRM, automatically creating and updating CiviCRM records when customers complete orders.",
+  "type": "drupal-module",
+  "license": "GPL-2.0-or-later",
+  "keywords": [
+    "drupal",
+    "commerce",
+    "civicrm",
+    "crm",
+    "ecommerce",
+    "integration",
+    "membership",
+    "contribution",
+    "event",
+    "rules"
+  ],
+  "authors": [
+    {
+      "name": "Your Name",
+      "email": "your.email@example.com",
+      "homepage": "https://example.com",
+      "role": "Maintainer"
+    }
+  ],
+  "homepage": "https://www.drupal.org/project/commerce_civicrm",
+  "support": {
+    "issues": "https://www.drupal.org/project/issues/commerce_civicrm",
+    "source": "https://git.drupalcode.org/project/commerce_civicrm",
+    "docs": "https://www.drupal.org/docs/contributed-modules/commerce-civicrm"
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true,
+  "require": {
+    "php": ">=8.3",
+    "drupal/core": "^10.3 || ^11.0",
+    "drupal/commerce": "^2.33",
+    "drupal/civicrm": "^6.0",
+    "drupal/profile": "^1.0",
+    "drupal/state_machine": "^1.0"
+  },
+  "require-dev": {
+    "drupal/coder": "^8.3",
+    "drupal/core-dev": "^10.3 || ^11.0",
+    "phpunit/phpunit": "^9.5",
+    "squizlabs/php_codesniffer": "^3.6"
+  },
+  "suggest": {
+    "drupal/rules": "^3.0 - Required for advanced automation and Rules integration features"
+  },
+  "config": {
+    "sort-packages": true,
+    "allow-plugins": {
+      "composer/installers": true,
+      "drupal/core-composer-scaffold": true,
+      "drupal/core-project-message": true,
+      "dealerdirect/phpcodesniffer-composer-installer": true
+    }
+  },
+  "extra": {
+    "drupal": {
+      "version": "2.0.0-dev",
+      "datestamp": "1735680000",
+      "security-coverage": {
+        "status": "not-covered",
+        "message": "Dev releases are not covered by Drupal security advisories."
+      }
+    },
+    "branch-alias": {
+      "dev-1.x": "1.x-dev"
+    }
+  },
+  "autoload": {
+    "psr-4": {
+      "Drupal\\commerce_civicrm\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Drupal\\Tests\\commerce_civicrm\\": "tests/"
+    }
+  }
+}

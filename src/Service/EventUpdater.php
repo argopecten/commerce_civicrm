@@ -7,6 +7,7 @@ use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_product\Entity\ProductInterface;
 use Drupal\commerce_order\Entity\OrderItemInterface;
+use Drupal\commerce_civicrm\Service\CivicrmHelper;
 
 /**
  * Service for updating CiviCRM events based on Commerce Order data.
@@ -28,11 +29,11 @@ class EventUpdater {
   protected $logger;
 
   /**
-   * The CiviCRM initializer service.
+   * The CiviCRM helper service.
    *
-   * @var \Drupal\commerce_civicrm\Service\CivicrmInitializer
+   * @var \Drupal\commerce_civicrm\Service\CivicrmHelper
    */
-  protected $civicrmInitializer;
+  protected $civicrmHelper;
 
   /**
    * Constructs an EventUpdater object.
@@ -41,13 +42,13 @@ class EventUpdater {
    *   The entity type manager.
    * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $logger_factory
    *   The logger factory.
-   * @param \Drupal\commerce_civicrm\Service\CivicrmInitializer $civicrm_initializer
-   *   The CiviCRM initializer service.
+   * @param \Drupal\commerce_civicrm\Service\CivicrmHelper $civicrm_helper
+   *   The CiviCRM helper service.
    */
-  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory, CivicrmInitializer $civicrm_initializer) {
+  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory, CivicrmHelper $civicrm_helper) {
     $this->entityTypeManager = $entity_type_manager;
     $this->logger = $logger_factory->get('commerce_civicrm');
-    $this->civicrmInitializer = $civicrm_initializer;
+    $this->civicrmHelper = $civicrm_helper;
   }
 
   /**
@@ -412,13 +413,178 @@ class EventUpdater {
   }
 
   /**
+   * Gets available CiviCRM events.
+   *
+   * @return array
+   *   Array of event options keyed by ID.
+   */
+  public function getEvents() {
+    $options = [];
+
+    try {
+      // Initialize CiviCRM
+      if (!$this->initializeCivicrm()) {
+        return ['' => t('CiviCRM not available')];
+      }
+
+      $result = \Civi\Api4\Event::get(FALSE)
+        ->addSelect('id', 'title', 'start_date', 'end_date')
+        ->addWhere('is_active', '=', TRUE)
+        ->addWhere('is_public', '=', TRUE)
+        ->addOrderBy('start_date', 'ASC')
+        ->setLimit(0)
+        ->execute();
+
+      $options[''] = t('- Select an event -');
+      foreach ($result as $event) {
+        $date_info = '';
+        if (!empty($event['start_date'])) {
+          $start_date = date('M j, Y', strtotime($event['start_date']));
+          $date_info = " ({$start_date})";
+        }
+        $options[$event['id']] = $event['title'] . $date_info;
+      }
+
+      if (count($options) === 1) {
+        $options[''] = t('No active events found');
+      }
+    } catch (\Exception $e) {
+      $this->logger->error('Failed to retrieve CiviCRM events: @error', [
+        '@error' => $e->getMessage(),
+      ]);
+      $options[''] = t('Error loading events');
+    }
+
+    return $options;
+  }
+
+  /**
+   * Gets available CiviCRM participant roles.
+   *
+   * @return array
+   *   Array of participant role options keyed by ID.
+   */
+  public function getParticipantRoles() {
+    $options = [];
+
+    try {
+      // Initialize CiviCRM
+      if (!$this->initializeCivicrm()) {
+        return ['' => t('CiviCRM not available')];
+      }
+
+      $result = \Civi\Api4\OptionValue::get(FALSE)
+        ->addSelect('value', 'label')
+        ->addWhere('option_group_id:name', '=', 'participant_role')
+        ->addWhere('is_active', '=', TRUE)
+        ->addOrderBy('weight', 'ASC')
+        ->setLimit(0)
+        ->execute();
+
+      $options[''] = t('- Select participant role -');
+      foreach ($result as $role) {
+        $options[$role['value']] = $role['label'];
+      }
+
+      if (count($options) === 1) {
+        $options[''] = t('No participant roles found');
+      }
+    } catch (\Exception $e) {
+      $this->logger->error('Failed to retrieve CiviCRM participant roles: @error', [
+        '@error' => $e->getMessage(),
+      ]);
+      $options[''] = t('Error loading participant roles');
+    }
+
+    return $options;
+  }
+
+  /**
+   * Creates an event registration with specific role.
+   *
+   * @param int $contact_id
+   *   The CiviCRM contact ID.
+   * @param int $event_id
+   *   The CiviCRM event ID.
+   * @param int $role_id
+   *   The participant role ID.
+   *
+   * @return int|null
+   *   The participant ID if successful, NULL otherwise.
+   */
+  public function createEventRegistrationWithRole($contact_id, $event_id, $role_id = NULL) {
+    try {
+      // Initialize CiviCRM
+      if (!$this->initializeCivicrm()) {
+        return NULL;
+      }
+
+      // Check if participant already exists
+      $existing = \Civi\Api4\Participant::get(FALSE)
+        ->addWhere('contact_id', '=', $contact_id)
+        ->addWhere('event_id', '=', $event_id)
+        ->addWhere('status_id:name', '!=', 'Cancelled')
+        ->execute();
+
+      if ($existing->count() > 0) {
+        $participant_id = $existing->first()['id'];
+        $this->logger->info('Participant already exists for contact @contact_id and event @event_id', [
+          '@contact_id' => $contact_id,
+          '@event_id' => $event_id,
+        ]);
+        return $participant_id;
+      }
+
+      // Get default participant status (usually 'Registered')
+      $status_id = $this->getParticipantStatusId('Registered');
+      
+      // Set default role if not specified
+      if (!$role_id) {
+        $role_id = $this->getParticipantRoleId('Attendee');
+      }
+
+      // Create participant
+      $participant_data = [
+        'contact_id' => $contact_id,
+        'event_id' => $event_id,
+        'status_id' => $status_id,
+        'role_id' => $role_id,
+        'register_date' => date('Y-m-d H:i:s'),
+        'source' => 'Drupal Commerce',
+      ];
+
+      $result = \Civi\Api4\Participant::create(FALSE)
+        ->setValues($participant_data)
+        ->execute();
+
+      if ($result->count() > 0) {
+        $participant_id = $result->first()['id'];
+        $this->logger->info('Created event registration for contact @contact_id, event @event_id, participant @participant_id', [
+          '@contact_id' => $contact_id,
+          '@event_id' => $event_id,
+          '@participant_id' => $participant_id,
+        ]);
+        return $participant_id;
+      }
+    } catch (\Exception $e) {
+      $this->logger->error('Error creating event registration for contact @contact_id, event @event_id: @error', [
+        '@contact_id' => $contact_id,
+        '@event_id' => $event_id,
+        '@error' => $e->getMessage(),
+      ]);
+    }
+
+    return NULL;
+  }
+
+  /**
    * Initializes CiviCRM and returns whether initialization was successful.
    *
    * @return bool
    *   TRUE if CiviCRM was successfully initialized, FALSE otherwise.
    */
   private function initializeCivicrm() {
-    return $this->civicrmInitializer->initialize();
+    return $this->civicrmHelper->initialize();
   }
 
 }
