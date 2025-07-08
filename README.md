@@ -253,12 +253,57 @@ $config['system.logging']['error_level'] = 'verbose';
 
 ## Views Integration
 
-The module includes a "My CiviCRM Orders" view at `/user/orders/civicrm` that displays:
+The module includes a "My Orders" view for displaying user order history:
 
-- Order numbers with links to order details
-- Order totals and status
-- Creation dates
-- Responsive table design for mobile devices
+### Current View Configuration
+- **View ID**: `my-orders`
+- **Path**: `/my-orders`
+- **Label**: "My orders"
+- **Module**: `commerce_civicrm`
+
+### Features
+The view displays:
+- **Order ID** with configurable linking to order details
+- **Order State** showing current order status
+- **Date Placed** with timestamp formatting
+- **Price** showing currency information
+- **Order Link** for direct order access
+
+### Current Implementation Details
+- **Base Table**: `commerce_order` - Commerce Order entity
+- **Access Control**: Currently set to "none" (needs proper permission configuration)
+- **Filter**: Uses `uid_current` to show current user's orders only
+- **Pagination**: Mini pager with 10 items per page
+- **Responsive**: Basic table layout with sortable columns
+
+### Recommended Improvements
+The current view configuration needs several improvements for production use:
+
+1. **Security**: Update access control to use `'view own commerce_order'` permission
+2. **Field Plugins**: Use proper Commerce plugins:
+   - `commerce_order_entity_link` for order numbers
+   - `commerce_price` for price display
+   - `state_machine_state` for order status
+3. **User Experience**: 
+   - Add account menu integration
+   - Improve responsive design
+   - Add empty state handling
+
+### Usage
+After installation and configuration fixes, users can access their orders at `/my-orders`. The view will need proper permissions and field plugin configuration before production use.
+
+### Quick Setup for Administrators
+1. **Configure Access Control**:
+   ```yaml
+   access:
+     type: perm
+     options:
+       perm: 'view own commerce_order'
+   ```
+2. **Update Field Plugins**: Replace generic `field` plugins with Commerce-specific ones
+3. **Enable Menu Integration**: Add account menu tab configuration
+
+For detailed implementation instructions, see the documentation files listed above.
 
 ## Developer Information
 
