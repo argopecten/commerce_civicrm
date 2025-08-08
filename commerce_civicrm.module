@@ -10,6 +10,8 @@
 
 use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\commerce_product\Entity\ProductType;
 
 
 /**
@@ -452,4 +454,141 @@ function _commerce_civicrm_get_participant_roles() {
     \Drupal::logger('commerce_civicrm')->error('Failed to get participant roles: @message', ['@message' => $e->getMessage()]);
     return ['' => t('Error loading participant roles')];
   }
+}
+
+/**
+ * Implements hook_commerce_product_type_insert().
+ *
+ * Automatically adds the CiviCRM field to newly created product types.
+ */
+function commerce_civicrm_commerce_product_type_insert(EntityInterface $entity) {
+  if ($entity->getEntityTypeId() === 'commerce_product_type') {
+    $bundle = $entity->id();
+    commerce_civicrm_add_field_to_product_type($bundle);
+    
+    \Drupal::logger('commerce_civicrm')->info('Automatically added CiviCRM field to new product type: @bundle', [
+      '@bundle' => $bundle,
+    ]);
+  }
+}
+
+/**
+ * Helper function to add the CiviCRM field to a specific product type.
+ *
+ * @param string $bundle
+ *   The machine name of the product type bundle.
+ *
+ * @return bool
+ *   TRUE if the field was added or already exists, FALSE on error.
+ */
+function commerce_civicrm_add_field_to_product_type($bundle) {
+  try {
+    $field_storage = \Drupal::entityTypeManager()->getStorage('field_storage_config');
+    $field_config = \Drupal::entityTypeManager()->getStorage('field_config');
+    
+    // Ensure field storage exists
+    $storage_exists = $field_storage->load('commerce_product.field_civicrm');
+    if (!$storage_exists) {
+      $field_storage->create([
+        'field_name' => 'field_civicrm',
+        'entity_type' => 'commerce_product',
+        'type' => 'text_long',
+        'cardinality' => 1,
+        'settings' => [],
+      ])->save();
+    }
+    
+    // Check if field already exists on this bundle
+    $field_exists = $field_config->load('commerce_product.' . $bundle . '.field_civicrm');
+    if ($field_exists) {
+      return TRUE; // Already exists
+    }
+    
+    // Create field instance for this bundle
+    $field_config->create([
+      'field_name' => 'field_civicrm',
+      'entity_type' => 'commerce_product',
+      'bundle' => $bundle,
+      'label' => 'CiviCRM Integration Settings',
+      'description' => 'Configuration for CiviCRM integration when this product is purchased.',
+      'required' => FALSE,
+      'settings' => [],
+      'default_value' => [],
+    ])->save();
+    
+    // Set the field to be hidden by default in form and view displays
+    $form_display = \Drupal::entityTypeManager()
+      ->getStorage('entity_form_display')
+      ->load('commerce_product.' . $bundle . '.default');
+    
+    if ($form_display) {
+      $form_display->removeComponent('field_civicrm')->save();
+    }
+    
+    $view_display = \Drupal::entityTypeManager()
+      ->getStorage('entity_view_display')
+      ->load('commerce_product.' . $bundle . '.default');
+    
+    if ($view_display) {
+      $view_display->removeComponent('field_civicrm')->save();
+    }
+    
+    \Drupal::logger('commerce_civicrm')->notice('CiviCRM field added to product type: @bundle', ['@bundle' => $bundle]);
+    
+    return TRUE;
+  }
+  catch (\Exception $e) {
+    \Drupal::logger('commerce_civicrm')->error('Failed to add CiviCRM field to product type @bundle: @message', [
+      '@bundle' => $bundle,
+      '@message' => $e->getMessage(),
+    ]);
+    return FALSE;
+  }
+}
+
+/**
+ * Helper function to add the CiviCRM field to all existing product types.
+ *
+ * This function can be called manually if needed to ensure all product types
+ * have the CiviCRM field, for example after troubleshooting or in update hooks.
+ *
+ * @return array
+ *   An associative array with 'success' and 'failed' keys containing
+ *   arrays of product type machine names.
+ */
+function commerce_civicrm_add_field_to_all_product_types() {
+  $results = ['success' => [], 'failed' => []];
+  
+  try {
+    // Get all product bundles
+    $product_bundles = \Drupal::service('entity_type.bundle.info')->getBundleInfo('commerce_product');
+    
+    foreach ($product_bundles as $bundle => $info) {
+      if (commerce_civicrm_add_field_to_product_type($bundle)) {
+        $results['success'][] = $bundle;
+      } else {
+        $results['failed'][] = $bundle;
+      }
+    }
+    
+    if (!empty($results['success'])) {
+      \Drupal::messenger()->addMessage(t('CiviCRM field added to product types: @types', [
+        '@types' => implode(', ', $results['success']),
+      ]));
+    }
+    
+    if (!empty($results['failed'])) {
+      \Drupal::messenger()->addError(t('Failed to add CiviCRM field to product types: @types', [
+        '@types' => implode(', ', $results['failed']),
+      ]));
+    }
+  }
+  catch (\Exception $e) {
+    \Drupal::logger('commerce_civicrm')->error('Failed to add CiviCRM field to all product types: @message', [
+      '@message' => $e->getMessage(),
+    ]);
+    $results['failed'][] = 'Error: ' . $e->getMessage();
+  }
+  
+  return $results;
 }

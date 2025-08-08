@@ -113,61 +113,17 @@ function commerce_civicrm_uninstall() {
  * Implements hook_install().
  */
 function commerce_civicrm_install() {
-  // Create the field_civicrm field on product entities if it doesn't exist
-  $field_storage = \Drupal::entityTypeManager()->getStorage('field_storage_config');
-  $field_config = \Drupal::entityTypeManager()->getStorage('field_config');
+  // Add the CiviCRM field to all existing product types
+  // This uses the helper function that will also be used for new product types
+  $results = commerce_civicrm_add_field_to_all_product_types();
   
-  // Check if field storage already exists
-  $storage_exists = $field_storage->load('commerce_product.field_civicrm');
+  if (!empty($results['success'])) {
+    \Drupal::messenger()->addMessage(t('CiviCRM field has been added to product types: @types. You can now configure CiviCRM integration on product edit forms.', [
+      '@types' => implode(', ', $results['success']),
+    ]));
+  }
   
-  if (!$storage_exists) {
-    // Create field storage
-    $field_storage->create([
-      'field_name' => 'field_civicrm',
-      'entity_type' => 'commerce_product',
-      'type' => 'text_long',
-      'cardinality' => 1,
-      'settings' => [],
-    ])->save();
-    
-    // Get all product bundles
-    $product_bundles = \Drupal::service('entity_type.bundle.info')->getBundleInfo('commerce_product');
-    
-    // Add field to all product bundles
-    foreach ($product_bundles as $bundle => $info) {
-      $field_exists = $field_config->load('commerce_product.' . $bundle . '.field_civicrm');
-      
-      if (!$field_exists) {
-        $field_config->create([
-          'field_name' => 'field_civicrm',
-          'entity_type' => 'commerce_product',
-          'bundle' => $bundle,
-          'label' => 'CiviCRM Integration Settings',
-          'description' => 'Configuration for CiviCRM integration when this product is purchased.',
-          'required' => FALSE,
-          'settings' => [],
-          'default_value' => [],
-        ])->save();
-        
-        // Set the field to be hidden by default in form and view displays
-        $form_display = \Drupal::entityTypeManager()
-          ->getStorage('entity_form_display')
-          ->load('commerce_product.' . $bundle . '.default');
-        
-        if ($form_display) {
-          $form_display->removeComponent('field_civicrm')->save();
-        }
-        
-        $view_display = \Drupal::entityTypeManager()
-          ->getStorage('entity_view_display')
-          ->load('commerce_product.' . $bundle . '.default');
-        
-        if ($view_display) {
-          $view_display->removeComponent('field_civicrm')->save();
-        }
-      }
-    }
-    
-    \Drupal::messenger()->addMessage(t('CiviCRM field has been added to product types. You can now configure CiviCRM integration on product edit forms.'));
+  if (empty($results['success']) && empty($results['failed'])) {
+    \Drupal::messenger()->addMessage(t('No product types found. The CiviCRM field will be automatically added to new product types as they are created.'));
   }
 }
