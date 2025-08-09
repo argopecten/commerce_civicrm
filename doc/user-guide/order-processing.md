@@ -7,16 +7,31 @@ When customers complete orders, the module automatically processes CiviCRM integ
 ## Processing Workflow
 
 ### Event Triggers
-The module processes orders when they transition to specific states:
-- **Order Placed**: `commerce_order.place.post_transition`
-- **Order Fulfilled**: `commerce_order.fulfill.post_transition`
+The module processes orders when they transition through specific workflow states:
+
+| Transition | From State | To State | Processing Type |
+|------------|------------|----------|-----------------|
+| **Place** | draft | completed | Full CiviCRM processing |
+| **Validate** | validation | any | Full CiviCRM processing |
+| **Cancel** | any | canceled | Cancellation handling |
+| **Fulfill** | fulfillment | any | Fulfillment handling |
+
+#### State Validation
+Each transition handler validates the from/to states to ensure appropriate processing:
+- **Place**: Only processes when transitioning FROM 'draft' state
+- **Cancel**: Only processes when transitioning TO 'canceled' state  
+- **Validate**: Only processes when transitioning FROM 'validation' state (to any destination state)
+- **Fulfill**: Only processes when transitioning FROM 'fulfillment' state (to any destination state)
 
 ### Processing Steps
 
-1. **Contact Processing**: Creates or updates CiviCRM contact from billing profile
-2. **Product Analysis**: Reviews each order item for CiviCRM configuration
-3. **Entity Creation**: Creates appropriate CiviCRM records based on product settings
-4. **Logging**: Records all operations for audit and debugging
+1. **Order Workflow Transition**: Order undergoes a monitored transition (place, validate, cancel, fulfill)
+2. **State Validation**: Subscriber validates that the transition matches expected from/to states
+3. **CiviCRM Integration Check**: System checks if order items have CiviCRM integration enabled
+4. **Contact Processing**: Creates or updates CiviCRM contact from billing profile (for place/validate events)
+5. **Product Analysis**: Reviews each order item for CiviCRM configuration (for place/validate events)
+6. **Entity Creation**: Creates appropriate CiviCRM records based on product settings (for place/validate events)
+7. **Event Logging**: Records all operations and state transitions for audit and debugging
 
 ## Detailed Processing
 

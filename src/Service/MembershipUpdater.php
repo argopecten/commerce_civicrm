@@ -546,4 +546,194 @@ class MembershipUpdater {
     }
   }
 
+  /**
+   * Creates a pending membership from an order.
+   *
+   * @param int $contact_id
+   *   The CiviCRM contact ID.
+   * @param int $membership_type_id
+   *   The CiviCRM membership type ID.
+   * @param \Drupal\commerce_order\Entity\OrderInterface $order
+   *   The Commerce Order entity.
+   * @param \Drupal\commerce_order\Entity\OrderItemInterface $order_item
+   *   The Commerce Order Item entity.
+   *
+   * @return int|null
+   *   The membership ID if successful, NULL otherwise.
+   */
+  public function createPendingMembershipFromOrder($contact_id, $membership_type_id, OrderInterface $order, OrderItemInterface $order_item) {
+    if (!$this->civicrmHelper->initialize()) {
+      $this->logger->error('Failed to initialize CiviCRM for pending membership creation');
+      return NULL;
+    }
+
+    try {
+      $this->logger->info('Creating pending CiviCRM membership for contact @contact_id, type @type_id', [
+        '@contact_id' => $contact_id,
+        '@type_id' => $membership_type_id,
+      ]);
+
+      // Check if membership already exists
+      $existing_membership = $this->findExistingMembership($contact_id, $membership_type_id);
+      if ($existing_membership) {
+        $this->logger->info('Existing membership found, updating to pending status');
+        return $this->updateMembershipToPending($existing_membership['id'], $order, $order_item);
+      }
+
+      // Get membership type details
+      $membership_type = $this->getMembershipTypeDetails($membership_type_id);
+      if (!$membership_type) {
+        $this->logger->error('Membership type @type_id not found', [
+          '@type_id' => $membership_type_id,
+        ]);
+        return NULL;
+      }
+
+      // Calculate membership dates
+      $dates = $this->calculateMembershipDates($membership_type);
+      
+      // Prepare membership data with pending status
+      $membership_data = [
+        'contact_id' => $contact_id,
+        'membership_type_id' => $membership_type_id,
+        'join_date' => $dates['join_date'],
+        'start_date' => $dates['start_date'],
+        'end_date' => $dates['end_date'],
+        'source' => 'Commerce Order #' . $order->id() . ' (Pending)',
+        'status_id' => 'Pending',
+      ];
+
+      // Add custom fields if configured
+      $membership_data = $this->addCustomFieldsToMembership($membership_data, $order, $order_item);
+
+      // Create the membership
+      $result = civicrm_api4('Membership', 'create', [
+        'values' => $membership_data,
+      ]);
+
+      if (!empty($result[0]['id'])) {
+        $membership_id = $result[0]['id'];
+        $this->logger->info('Created pending CiviCRM membership @membership_id for contact @contact_id', [
+          '@membership_id' => $membership_id,
+          '@contact_id' => $contact_id,
+        ]);
+        return $membership_id;
+      }
+
+      $this->logger->error('Failed to create pending CiviCRM membership: empty result');
+      return NULL;
+
+    } catch (\Exception $e) {
+      $this->logger->error('Error creating pending CiviCRM membership: @error', [
+        '@error' => $e->getMessage(),
+      ]);
+      return NULL;
+    }
+  }
+
+  /**
+   * Updates an existing membership to pending status.
+   *
+   * @param int $membership_id
+   *   The membership ID to update.
+   * @param \Drupal\commerce_order\Entity\OrderInterface $order
+   *   The Commerce Order entity.
+   * @param \Drupal\commerce_order\Entity\OrderItemInterface $order_item
+   *   The Commerce Order Item entity.
+   *
+   * @return int|null
+   *   The membership ID if successful, NULL otherwise.
+   */
+  protected function updateMembershipToPending($membership_id, OrderInterface $order, OrderItemInterface $order_item) {
+    try {
+      $update_data = [
+        'status_id:name' => 'Pending',
+        'source' => 'Commerce Order #' . $order->id() . ' (Pending)',
+      ];
+
+      // Add custom fields if configured
+      $update_data = $this->addCustomFieldsToMembership($update_data, $order, $order_item);
+
+      $result = civicrm_api4('Membership', 'update', [
+        'where' => [['id', '=', $membership_id]],
+        'values' => $update_data,
+      ]);
+
+      if (!empty($result[0]['id'])) {
+        $this->logger->info('Updated CiviCRM membership @membership_id to pending status', [
+          '@membership_id' => $membership_id,
+        ]);
+        return $membership_id;
+      }
+
+      return NULL;
+    } catch (\Exception $e) {
+      $this->logger->error('Error updating CiviCRM membership to pending: @error', [
+        '@error' => $e->getMessage(),
+      ]);
+      return NULL;
+    }
+  }
+
+  /**
+   * Cancels a membership from an order.
+   *
+   * @param int $contact_id
+   *   The CiviCRM contact ID.
+   * @param int $membership_type_id
+   *   The CiviCRM membership type ID.
+   * @param \Drupal\commerce_order\Entity\OrderInterface $order
+   *   The Commerce Order entity.
+   * @param \Drupal\commerce_order\Entity\OrderItemInterface $order_item
+   *   The Commerce Order Item entity.
+   *
+   * @return int|null
+   *   The cancelled membership ID if successful, NULL otherwise.
+   */
+  public function cancelMembershipFromOrder($contact_id, $membership_type_id, OrderInterface $order, OrderItemInterface $order_item) {
+    if (!$this->civicrmHelper->initialize()) {
+      $this->logger->error('Failed to initialize CiviCRM for membership cancellation');
+      return NULL;
+    }
+
+    try {
+      $this->logger->info('Cancelling CiviCRM membership for contact @contact_id, type @type_id', [
+        '@contact_id' => $contact_id,
+        '@type_id' => $membership_type_id,
+      ]);
+
+      $existing_membership = $this->findExistingMembership($contact_id, $membership_type_id);
+      if (!$existing_membership) {
+        $this->logger->warning('No existing membership found for cancellation for contact @contact_id, type @type_id', [
+          '@contact_id' => $contact_id,
+          '@type_id' => $membership_type_id,
+        ]);
+        return NULL;
+      }
+
+      $result = civicrm_api4('Membership', 'update', [
+        'where' => [['id', '=', $existing_membership['id']]],
+        'values' => [
+          'status_id:name' => 'Cancelled',
+          'source' => 'Commerce Order #' . $order->id() . ' (Cancelled)',
+        ],
+      ]);
+
+      if (!empty($result[0]['id'])) {
+        $this->logger->info('Cancelled CiviCRM membership @membership_id for contact @contact_id', [
+          '@membership_id' => $existing_membership['id'],
+          '@contact_id' => $contact_id,
+        ]);
+        return $existing_membership['id'];
+      }
+
+      return NULL;
+    } catch (\Exception $e) {
+      $this->logger->error('Error cancelling CiviCRM membership: @error', [
+        '@error' => $e->getMessage(),
+      ]);
+      return NULL;
+    }
+  }
+
 }

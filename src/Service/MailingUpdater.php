@@ -522,4 +522,101 @@ class MailingUpdater {
     }
   }
 
+  /**
+   * Processes initial mailing subscription from a placed order.
+   *
+   * @param int $contact_id
+   *   The CiviCRM contact ID.
+   * @param int $mailing_group_id
+   *   The CiviCRM mailing group ID.
+   * @param \Drupal\commerce_order\Entity\OrderInterface $order
+   *   The Commerce Order entity.
+   * @param array $preferences
+   *   Array of mailing preferences.
+   *
+   * @return bool
+   *   TRUE if successful, FALSE otherwise.
+   */
+  public function processInitialMailingSubscriptionFromOrder($contact_id, $mailing_group_id, OrderInterface $order, array $preferences = []) {
+    $this->logger->info('Processing initial mailing subscription from placed order @order_id for contact @contact_id', [
+      '@order_id' => $order->id(),
+      '@contact_id' => $contact_id,
+    ]);
+
+    // Add additional context for order-based initial subscriptions
+    $initial_preferences = array_merge($preferences, [
+      'source' => 'Commerce Order #' . $order->id() . ' (Initial)',
+      'immediate_only' => TRUE, // Flag to indicate only essential/immediate lists
+    ]);
+    
+    return $this->addContactToMailingGroup($contact_id, $mailing_group_id, $initial_preferences);
+  }
+
+  /**
+   * Removes a contact from a mailing group based on an order.
+   *
+   * @param int $contact_id
+   *   The CiviCRM contact ID.
+   * @param int $mailing_group_id
+   *   The CiviCRM mailing group ID.
+   * @param \Drupal\commerce_order\Entity\OrderInterface $order
+   *   The Commerce Order entity.
+   * @param array $preferences
+   *   Array of mailing preferences.
+   *
+   * @return bool
+   *   TRUE if successful, FALSE otherwise.
+   */
+  public function removeFromMailingGroupFromOrder($contact_id, $mailing_group_id, OrderInterface $order, array $preferences = []) {
+    if (!$this->civicrmHelper->initialize()) {
+      $this->logger->error('Failed to initialize CiviCRM for mailing group removal from order');
+      return FALSE;
+    }
+
+    try {
+      $this->logger->info('Removing contact @contact_id from mailing group @group_id due to order @order_id', [
+        '@contact_id' => $contact_id,
+        '@group_id' => $mailing_group_id,
+        '@order_id' => $order->id(),
+      ]);
+
+      // Check if contact is in the group
+      $existing_membership = $this->checkGroupMembership($contact_id, $mailing_group_id);
+      if (!$existing_membership) {
+        $this->logger->info('Contact @contact_id is not in mailing group @group_id, nothing to remove', [
+          '@contact_id' => $contact_id,
+          '@group_id' => $mailing_group_id,
+        ]);
+        return TRUE; // Not an error if they're not in the group
+      }
+
+      // Update group membership to removed status
+      $result = civicrm_api4('GroupContact', 'update', [
+        'where' => [
+          ['contact_id', '=', $contact_id],
+          ['group_id', '=', $mailing_group_id],
+        ],
+        'values' => [
+          'status' => 'Removed',
+        ],
+      ]);
+
+      $this->logger->info('Removed contact @contact_id from mailing group @group_id due to order @order_id', [
+        '@contact_id' => $contact_id,
+        '@group_id' => $mailing_group_id,
+        '@order_id' => $order->id(),
+      ]);
+
+      return TRUE;
+    } catch (\Exception $e) {
+      $this->logger->error('Error removing contact @contact_id from mailing group @group_id for order @order_id: @error', [
+        '@contact_id' => $contact_id,
+        '@group_id' => $mailing_group_id,
+        '@order_id' => $order->id(),
+        '@error' => $e->getMessage(),
+      ]);
+      return FALSE;
+    }
+  }
+
 }

@@ -465,4 +465,109 @@ class ContributionUpdater {
     }
   }
 
+  /**
+   * Cancels a CiviCRM contribution from a cancelled order.
+   *
+   * @param \Drupal\commerce_order\Entity\OrderInterface $order
+   *   The Commerce Order entity.
+   * @param int $contact_id
+   *   The CiviCRM contact ID.
+   *
+   * @return int|null
+   *   The cancelled contribution ID if successful, NULL otherwise.
+   */
+  public function cancelContributionFromOrder(OrderInterface $order, $contact_id) {
+    try {
+      $this->logger->info('Cancelling CiviCRM contribution for order @order_id, contact @contact_id', [
+        '@order_id' => $order->id(),
+        '@contact_id' => $contact_id,
+      ]);
+
+      // Find existing contribution for this order
+      $existing_contribution_id = $this->findExistingContribution($order);
+      if (!$existing_contribution_id) {
+        $this->logger->warning('No existing contribution found for order @order_id to cancel', [
+          '@order_id' => $order->id(),
+        ]);
+        return NULL;
+      }
+
+      // Initialize CiviCRM
+      if (!$this->initializeCivicrm()) {
+        return NULL;
+      }
+
+      // Get cancelled status ID
+      $cancelled_status_id = $this->getContributionStatusIdByName('Cancelled');
+      if (!$cancelled_status_id) {
+        $this->logger->error('Could not find Cancelled status for contributions');
+        return NULL;
+      }
+
+      // Update contribution status to cancelled
+      $result = \Civi\Api4\Contribution::update(FALSE)
+        ->addWhere('id', '=', $existing_contribution_id)
+        ->addValue('contribution_status_id', $cancelled_status_id)
+        ->addValue('source', 'Commerce Order #' . $order->id() . ' (Cancelled)')
+        ->execute();
+
+      if ($result->count() > 0) {
+        $this->logger->info('Cancelled CiviCRM contribution @contribution_id for order @order_id', [
+          '@contribution_id' => $existing_contribution_id,
+          '@order_id' => $order->id(),
+        ]);
+        return $existing_contribution_id;
+      }
+
+      $this->logger->error('Failed to cancel contribution @contribution_id for order @order_id', [
+        '@contribution_id' => $existing_contribution_id,
+        '@order_id' => $order->id(),
+      ]);
+      return NULL;
+
+    } catch (\Exception $e) {
+      $this->logger->error('Error cancelling CiviCRM contribution for order @order_id: @error', [
+        '@order_id' => $order->id(),
+        '@error' => $e->getMessage(),
+      ]);
+      return NULL;
+    }
+  }
+
+  /**
+   * Gets contribution status ID by name.
+   *
+   * @param string $status_name
+   *   The status name (e.g., 'Cancelled', 'Completed', 'Pending').
+   *
+   * @return int|null
+   *   The status ID if found, NULL otherwise.
+   */
+  protected function getContributionStatusIdByName($status_name) {
+    try {
+      // Initialize CiviCRM
+      if (!$this->initializeCivicrm()) {
+        return NULL;
+      }
+
+      $result = \Civi\Api4\OptionValue::get(FALSE)
+        ->addSelect('value')
+        ->addWhere('option_group_id:name', '=', 'contribution_status')
+        ->addWhere('name', '=', $status_name)
+        ->setLimit(1)
+        ->execute();
+
+      if ($result->count() > 0) {
+        return $result->first()['value'];
+      }
+    } catch (\Exception $e) {
+      $this->logger->error('Error getting contribution status ID for @status: @error', [
+        '@status' => $status_name,
+        '@error' => $e->getMessage(),
+      ]);
+    }
+
+    return NULL;
+  }
+
 }

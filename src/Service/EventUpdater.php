@@ -587,4 +587,91 @@ class EventUpdater {
     return $this->civicrmHelper->initialize();
   }
 
+  /**
+   * Cancels an event registration from an order.
+   *
+   * @param int $contact_id
+   *   The CiviCRM contact ID.
+   * @param int $event_id
+   *   The CiviCRM event ID.
+   * @param \Drupal\commerce_order\Entity\OrderInterface $order
+   *   The Commerce Order entity.
+   * @param int $role_id
+   *   The participant role ID (optional).
+   *
+   * @return int|null
+   *   The cancelled participant ID if successful, NULL otherwise.
+   */
+  public function cancelEventRegistrationFromOrder($contact_id, $event_id, OrderInterface $order, $role_id = NULL) {
+    try {
+      $this->logger->info('Cancelling event registration for contact @contact_id, event @event_id, order @order_id', [
+        '@contact_id' => $contact_id,
+        '@event_id' => $event_id,
+        '@order_id' => $order->id(),
+      ]);
+
+      // Initialize CiviCRM
+      if (!$this->initializeCivicrm()) {
+        return NULL;
+      }
+
+      // Find existing participant for this contact and event
+      $existing_participant = \Civi\Api4\Participant::get(FALSE)
+        ->addSelect('id', 'status_id')
+        ->addWhere('contact_id', '=', $contact_id)
+        ->addWhere('event_id', '=', $event_id)
+        ->addWhere('source', 'LIKE', '%Order #' . $order->id() . '%')
+        ->setLimit(1)
+        ->execute();
+
+      if ($existing_participant->count() === 0) {
+        $this->logger->warning('No existing participant found for contact @contact_id, event @event_id, order @order_id', [
+          '@contact_id' => $contact_id,
+          '@event_id' => $event_id,
+          '@order_id' => $order->id(),
+        ]);
+        return NULL;
+      }
+
+      $participant = $existing_participant->first();
+      $participant_id = $participant['id'];
+
+      // Get cancelled status ID
+      $cancelled_status_id = $this->getParticipantStatusId('Cancelled');
+      if (!$cancelled_status_id) {
+        $this->logger->error('Could not find Cancelled status for participants');
+        return NULL;
+      }
+
+      // Update participant status to cancelled
+      $result = \Civi\Api4\Participant::update(FALSE)
+        ->addWhere('id', '=', $participant_id)
+        ->addValue('status_id', $cancelled_status_id)
+        ->addValue('source', 'Commerce Order #' . $order->id() . ' (Cancelled)')
+        ->execute();
+
+      if ($result->count() > 0) {
+        $this->logger->info('Cancelled event registration @participant_id for contact @contact_id, event @event_id', [
+          '@participant_id' => $participant_id,
+          '@contact_id' => $contact_id,
+          '@event_id' => $event_id,
+        ]);
+        return $participant_id;
+      }
+
+      $this->logger->error('Failed to cancel event registration @participant_id', [
+        '@participant_id' => $participant_id,
+      ]);
+      return NULL;
+
+    } catch (\Exception $e) {
+      $this->logger->error('Error cancelling event registration for contact @contact_id, event @event_id: @error', [
+        '@contact_id' => $contact_id,
+        '@event_id' => $event_id,
+        '@error' => $e->getMessage(),
+      ]);
+      return NULL;
+    }
+  }
+
 }

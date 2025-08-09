@@ -8,6 +8,7 @@ The Commerce CiviCRM module follows modern Drupal best practices with a service-
 
 ### Separation of Concerns
 Each service has a specific responsibility:
+- **OrderCompleteSubscriber**: Event subscription and order workflow transition handling
 - **ContactUpdater**: Contact management and creation
 - **ContributionUpdater**: Financial record management
 - **MembershipUpdater**: Membership lifecycle management
@@ -26,6 +27,12 @@ Services are defined in `commerce_civicrm.services.yml`:
 
 ```yaml
 services:
+  commerce_civicrm.order_complete_subscriber:
+    class: Drupal\commerce_civicrm\EventSubscriber\OrderCompleteSubscriber
+    arguments: ['@logger.factory', '@entity_type.manager', '@commerce_civicrm.order_civicrm_updater']
+    tags:
+      - { name: event_subscriber }
+
   commerce_civicrm.contact_updater:
     class: Drupal\commerce_civicrm\Service\ContactUpdater
     arguments: ['@entity_type.manager', '@logger.factory', '@commerce_civicrm.civicrm_helper']
@@ -62,12 +69,13 @@ services:
 
 ### Core Service Dependencies
 ```
-OrderCivicrmUpdater
-├── ContactUpdater
-├── ContributionUpdater
-├── MembershipUpdater  
-├── EventUpdater
-└── MailingUpdater
+OrderCompleteSubscriber (Event Subscriber)
+├── OrderCivicrmUpdater
+    ├── ContactUpdater
+    ├── ContributionUpdater
+    ├── MembershipUpdater  
+    ├── EventUpdater
+    └── MailingUpdater
 
 All services depend on:
 ├── EntityTypeManager
@@ -76,10 +84,11 @@ All services depend on:
 ```
 
 ### Data Flow
-1. **Order Processing**: OrderCivicrmUpdater receives order events
-2. **Contact Management**: ContactUpdater creates/updates contacts
-3. **Entity Processing**: Specialized services handle specific CiviCRM entities
-4. **Result Aggregation**: OrderCivicrmUpdater collects and reports results
+1. **Order Workflow Events**: OrderCompleteSubscriber listens for transition events
+2. **Order Processing**: OrderCivicrmUpdater receives order events from subscriber
+3. **Contact Management**: ContactUpdater creates/updates contacts
+4. **Entity Processing**: Specialized services handle specific CiviCRM entities
+5. **Result Aggregation**: OrderCivicrmUpdater collects and reports results
 
 ## Common Service Patterns
 
@@ -133,7 +142,14 @@ $this->logger->info('Created @entity @id for contact @contact_id', [
 
 ### In Order Processing
 ```php
-// Get the main orchestration service
+// Automatic processing via event subscriber
+// Order workflow transitions trigger automatically:
+// draft → completed (place)
+// validation → completed (validate)  
+// any → canceled (cancel)
+// completed → fulfilled (fulfill)
+
+// Manual processing using the main orchestration service
 $order_updater = \Drupal::service('commerce_civicrm.order_civicrm_updater');
 $results = $order_updater->processCompletedOrder($order);
 ```
@@ -260,6 +276,8 @@ foreach ($plugins as $plugin) {
 ## Service Documentation
 
 Individual service documentation:
+- **[OrderCompleteSubscriber](order-complete-subscriber.md)** - Order workflow event subscription service
+- **[OrderCivicrmUpdater](order-civicrm-updater.md)** - Main orchestration service
 - **[ContactUpdater](contact-updater.md)** - Contact management service
 - **[ContributionUpdater](contribution-updater.md)** - Contribution management service  
 - **[MembershipUpdater](membership-updater.md)** - Membership management service
