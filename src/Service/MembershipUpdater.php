@@ -105,7 +105,7 @@ class MembershipUpdater {
         'start_date' => $dates['start_date'],
         'end_date' => $dates['end_date'],
         'source' => 'Commerce Order #' . $order->id(),
-        'status_id' => 'New', // Will be updated based on payment status
+        'status_id' => $this->getMembershipStatusId('New'), // Will be updated based on payment status
       ];
 
       // Add custom fields if configured
@@ -337,7 +337,7 @@ class MembershipUpdater {
 
       civicrm_api4('Membership', 'update', [
         'where' => [['id', '=', $membership_id]],
-        'values' => ['status_id:name' => $status_name],
+        'values' => ['status_id' => $this->getMembershipStatusId($status_name)],
       ]);
 
       $this->logger->info('Updated membership @membership_id status to @status', [
@@ -404,16 +404,14 @@ class MembershipUpdater {
       }
 
       // Update membership
-      $result = civicrm_api4('Membership', 'update', [
-        'where' => [['id', '=', $existing_membership['id']]],
-        'values' => [
-          'end_date' => $new_end_date->format('Y-m-d'),
-          'status_id:name' => 'Current',
-          'source' => 'Commerce Order #' . $order->id() . ' (Renewal)',
-        ],
-      ]);
-
-      if (!empty($result[0]['id'])) {
+        $result = civicrm_api4('Membership', 'update', [
+          'where' => [['id', '=', $membership_id]],
+          'values' => [
+            'end_date' => $new_end_date->format('Y-m-d'),
+            'status_id' => $this->getMembershipStatusId('Current'),
+            'source' => 'Commerce Order #' . $order->id() . ' (Renewal)',
+          ],
+        ]);      if (!empty($result[0]['id'])) {
         $this->logger->info('Renewed CiviCRM membership @membership_id until @end_date', [
           '@membership_id' => $existing_membership['id'],
           '@end_date' => $new_end_date->format('Y-m-d'),
@@ -492,7 +490,7 @@ class MembershipUpdater {
       $result = civicrm_api4('Membership', 'update', [
         'where' => [['id', '=', $existing_membership['id']]],
         'values' => [
-          'status_id:name' => 'Cancelled',
+          'status_id' => $this->getMembershipStatusId('Cancelled'),
           'source' => 'Commerce Order #' . $order->id() . ' (Cancelled)',
         ],
       ]);
@@ -592,6 +590,18 @@ class MembershipUpdater {
       // Calculate membership dates
       $dates = $this->calculateMembershipDates($membership_type);
       
+      // Get proper status ID for pending memberships
+      $pending_status_id = $this->getMembershipStatusId('Pending');
+      if (!$pending_status_id) {
+        // Fallback to 'New' status if 'Pending' doesn't exist
+        $pending_status_id = $this->getMembershipStatusId('New');
+      }
+      
+      if (!$pending_status_id) {
+        $this->logger->error('Could not find valid membership status for pending membership');
+        return NULL;
+      }
+      
       // Prepare membership data with pending status
       $membership_data = [
         'contact_id' => $contact_id,
@@ -600,11 +610,15 @@ class MembershipUpdater {
         'start_date' => $dates['start_date'],
         'end_date' => $dates['end_date'],
         'source' => 'Commerce Order #' . $order->id() . ' (Pending)',
-        'status_id' => 'Pending',
+        'status_id' => $pending_status_id,
       ];
 
       // Add custom fields if configured
       $membership_data = $this->addCustomFieldsToMembership($membership_data, $order, $order_item);
+
+      $this->logger->info('Creating membership with data: @data', [
+        '@data' => json_encode($membership_data),
+      ]);
 
       // Create the membership
       $result = civicrm_api4('Membership', 'create', [
@@ -646,8 +660,20 @@ class MembershipUpdater {
    */
   protected function updateMembershipToPending($membership_id, OrderInterface $order, OrderItemInterface $order_item) {
     try {
+      // Get proper status ID for pending memberships
+      $pending_status_id = $this->getMembershipStatusId('Pending');
+      if (!$pending_status_id) {
+        // Fallback to 'New' status if 'Pending' doesn't exist
+        $pending_status_id = $this->getMembershipStatusId('New');
+      }
+      
+      if (!$pending_status_id) {
+        $this->logger->error('Could not find valid membership status for pending update');
+        return NULL;
+      }
+
       $update_data = [
-        'status_id:name' => 'Pending',
+        'status_id' => $pending_status_id,
         'source' => 'Commerce Order #' . $order->id() . ' (Pending)',
       ];
 
@@ -714,7 +740,7 @@ class MembershipUpdater {
       $result = civicrm_api4('Membership', 'update', [
         'where' => [['id', '=', $existing_membership['id']]],
         'values' => [
-          'status_id:name' => 'Cancelled',
+          'status_id' => $this->getMembershipStatusId('Cancelled'),
           'source' => 'Commerce Order #' . $order->id() . ' (Cancelled)',
         ],
       ]);
@@ -734,6 +760,39 @@ class MembershipUpdater {
       ]);
       return NULL;
     }
+  }
+
+  /**
+   * Gets membership status ID by name.
+   *
+   * @param string $status_name
+   *   The status name (e.g., 'Pending', 'New', 'Current').
+   *
+   * @return int|null
+   *   The status ID if found, NULL otherwise.
+   */
+  protected function getMembershipStatusId($status_name) {
+    try {
+      $result = civicrm_api4('MembershipStatus', 'get', [
+        'select' => ['id'],
+        'where' => [
+          ['name', '=', $status_name],
+          ['is_active', '=', TRUE],
+        ],
+        'limit' => 1,
+      ]);
+
+      if (!empty($result[0]['id'])) {
+        return $result[0]['id'];
+      }
+    } catch (\Exception $e) {
+      $this->logger->error('Error getting membership status ID for @status: @error', [
+        '@status' => $status_name,
+        '@error' => $e->getMessage(),
+      ]);
+    }
+
+    return NULL;
   }
 
 }

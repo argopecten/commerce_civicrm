@@ -447,7 +447,7 @@ class ContributionUpdater {
         'total_amount' => $total_price->getNumber(),
         'currency' => $total_price->getCurrencyCode(),
         'source' => 'Drupal Commerce Order ' . $order->id(),
-        'contribution_status_id' => $contribution_status,
+        'contribution_status_id' => $this->getContributionStatusIdByName($contribution_status),
         'receive_date' => date('YmdHis'),
         'non_deductible_amount' => 0,
         'fee_amount' => 0,

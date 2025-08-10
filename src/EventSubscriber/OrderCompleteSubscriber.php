@@ -60,12 +60,18 @@ class OrderCompleteSubscriber implements EventSubscriberInterface {
     $order = $event->getEntity();
 
     // Check that this transition is from draft state
-    $transition = $event->getTransition();
-    if ($transition->getFromState()->getId() !== 'draft') {
+    $from_state = $event->getFromState()->getId();
+    $to_state = $event->getToState()->getId();
+    
+    if ($from_state !== 'draft') {
       return;
     }
 
-    $this->logger->info('Order @order_id has been placed (draft → completed).', ['@order_id' => $order->id()]);
+    $this->logger->info('Order @order_id has been placed (@from_state → @to_state).', [
+      '@order_id' => $order->id(),
+      '@from_state' => $from_state,
+      '@to_state' => $to_state,
+    ]);
 
     // Check if any order items have CiviCRM integration enabled
     $has_civicrm_integration = $this->hasCivicrmIntegration($order);
@@ -103,12 +109,18 @@ class OrderCompleteSubscriber implements EventSubscriberInterface {
     $order = $event->getEntity();
 
     // Check that this transition is to canceled state
-    $transition = $event->getTransition();
-    if ($transition->getToState()->getId() !== 'canceled') {
+    $from_state = $event->getFromState()->getId();
+    $to_state = $event->getToState()->getId();
+    
+    if ($to_state !== 'canceled') {
       return;
     }
 
-    $this->logger->info('Order @order_id has been canceled.', ['@order_id' => $order->id()]);
+    $this->logger->info('Order @order_id has been canceled (@from_state → @to_state).', [
+      '@order_id' => $order->id(),
+      '@from_state' => $from_state,
+      '@to_state' => $to_state,
+    ]);
 
     // Check if any order items have CiviCRM integration enabled
     $has_civicrm_integration = $this->hasCivicrmIntegration($order);
@@ -144,14 +156,16 @@ class OrderCompleteSubscriber implements EventSubscriberInterface {
     $order = $event->getEntity();
 
     // Check that this transition is from validation state
-    $transition = $event->getTransition();
-    if ($transition->getFromState()->getId() !== 'validation') {
+    $from_state = $event->getFromState()->getId();
+    $to_state = $event->getToState()->getId();
+    
+    if ($from_state !== 'validation') {
       return;
     }
 
-    $to_state = $transition->getToState()->getId();
-    $this->logger->info('Order @order_id has been validated (validation → @to_state).', [
+    $this->logger->info('Order @order_id has been validated (@from_state → @to_state).', [
       '@order_id' => $order->id(),
+      '@from_state' => $from_state,
       '@to_state' => $to_state,
     ]);
 
@@ -163,20 +177,23 @@ class OrderCompleteSubscriber implements EventSubscriberInterface {
       $results = $this->orderCivicrmUpdater->processCompletedOrder($order);
       
       if (!empty($results['contact_id'])) {
-        $this->logger->info('Successfully processed CiviCRM updates for validated order @order_id (validation → @to_state). Contact ID: @contact_id', [
+        $this->logger->info('Successfully processed CiviCRM updates for validated order @order_id (@from_state → @to_state). Contact ID: @contact_id', [
           '@order_id' => $order->id(),
+          '@from_state' => $from_state,
           '@to_state' => $to_state,
           '@contact_id' => $results['contact_id'],
         ]);
       } else {
-        $this->logger->error('Failed to process CiviCRM updates for validated order @order_id (validation → @to_state)', [
+        $this->logger->error('Failed to process CiviCRM updates for validated order @order_id (@from_state → @to_state)', [
           '@order_id' => $order->id(),
+          '@from_state' => $from_state,
           '@to_state' => $to_state,
         ]);
       }
     } else {
-      $this->logger->info('No CiviCRM integration enabled for validated order @order_id (validation → @to_state)', [
+      $this->logger->info('No CiviCRM integration enabled for validated order @order_id (@from_state → @to_state)', [
         '@order_id' => $order->id(),
+        '@from_state' => $from_state,
         '@to_state' => $to_state,
       ]);
     }
@@ -196,14 +213,16 @@ class OrderCompleteSubscriber implements EventSubscriberInterface {
     $order = $event->getEntity();
 
     // Check that this transition is from fulfillment state
-    $transition = $event->getTransition();
-    if ($transition->getFromState()->getId() !== 'fulfillment') {
+    $from_state = $event->getFromState()->getId();
+    $to_state = $event->getToState()->getId();
+    
+    if ($from_state !== 'fulfillment') {
       return;
     }
 
-    $to_state = $transition->getToState()->getId();
-    $this->logger->info('Order @order_id has been fulfilled (fulfillment → @to_state).', [
+    $this->logger->info('Order @order_id has been fulfilled (@from_state → @to_state).', [
       '@order_id' => $order->id(),
+      '@from_state' => $from_state,
       '@to_state' => $to_state,
     ]);
 
@@ -215,20 +234,23 @@ class OrderCompleteSubscriber implements EventSubscriberInterface {
       $results = $this->orderCivicrmUpdater->processCompletedOrder($order);
       
       if (!empty($results['contact_id'])) {
-        $this->logger->info('Successfully processed CiviCRM fulfillment updates for order @order_id (fulfillment → @to_state). Contact ID: @contact_id', [
+        $this->logger->info('Successfully processed CiviCRM fulfillment updates for order @order_id (@from_state → @to_state). Contact ID: @contact_id', [
           '@order_id' => $order->id(),
+          '@from_state' => $from_state,
           '@to_state' => $to_state,
           '@contact_id' => $results['contact_id'],
         ]);
       } else {
-        $this->logger->error('Failed to process CiviCRM fulfillment updates for order @order_id (fulfillment → @to_state)', [
+        $this->logger->error('Failed to process CiviCRM fulfillment updates for order @order_id (@from_state → @to_state)', [
           '@order_id' => $order->id(),
+          '@from_state' => $from_state,
           '@to_state' => $to_state,
         ]);
       }
     } else {
-      $this->logger->info('No CiviCRM integration enabled for fulfilled order @order_id (fulfillment → @to_state)', [
+      $this->logger->info('No CiviCRM integration enabled for fulfilled order @order_id (@from_state → @to_state)', [
         '@order_id' => $order->id(),
+        '@from_state' => $from_state,
         '@to_state' => $to_state,
       ]);
     }

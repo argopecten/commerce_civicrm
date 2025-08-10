@@ -126,13 +126,30 @@ class OrderCivicrmUpdater {
       ]);
 
       // Step 2: Process each order item for CiviCRM integration
+      $civicrm_enabled_items = 0;
       foreach ($order->getItems() as $order_item) {
-        $product = $order_item->getPurchasedEntity();
+        // Get the product variation first
+        $purchased_entity = $order_item->getPurchasedEntity();
+        
+        if (!$purchased_entity) {
+          continue;
+        }
+        
+        // Get the actual product that contains the field_civicrm configuration
+        $product = NULL;
+        if ($purchased_entity->getEntityTypeId() === 'commerce_product_variation') {
+          // If purchased entity is a variation, get the parent product
+          $product = $purchased_entity->getProduct();
+        } elseif ($purchased_entity->getEntityTypeId() === 'commerce_product') {
+          // If purchased entity is already a product
+          $product = $purchased_entity;
+        }
         
         if (!$product || !$this->contactUpdater->isProductCivicrmEnabled($product)) {
           continue;
         }
 
+        $civicrm_enabled_items++;
         $settings = $this->contactUpdater->getProductSettings($product);
         
         switch ($settings['entity']) {
@@ -268,7 +285,22 @@ class OrderCivicrmUpdater {
 
       // Step 2: Process each order item for cancellation-specific CiviCRM updates
       foreach ($order->getItems() as $order_item) {
-        $product = $order_item->getPurchasedEntity();
+        // Get the product variation first
+        $purchased_entity = $order_item->getPurchasedEntity();
+        
+        if (!$purchased_entity) {
+          continue;
+        }
+        
+        // Get the actual product that contains the field_civicrm configuration
+        $product = NULL;
+        if ($purchased_entity->getEntityTypeId() === 'commerce_product_variation') {
+          // If purchased entity is a variation, get the parent product
+          $product = $purchased_entity->getProduct();
+        } elseif ($purchased_entity->getEntityTypeId() === 'commerce_product') {
+          // If purchased entity is already a product
+          $product = $purchased_entity;
+        }
         
         if (!$product || !$this->contactUpdater->isProductCivicrmEnabled($product)) {
           continue;
@@ -409,15 +441,36 @@ class OrderCivicrmUpdater {
       ]);
 
       // Step 2: Process each order item for initial CiviCRM integration
+      $civicrm_enabled_items = 0;
       foreach ($order->getItems() as $order_item) {
-        $product = $order_item->getPurchasedEntity();
+        // Get the product variation first
+        $purchased_entity = $order_item->getPurchasedEntity();
         
+        if (!$purchased_entity) {
+          continue;
+        }
+        
+        // Get the actual product that contains the field_civicrm configuration
+        $product = NULL;
+        if ($purchased_entity->getEntityTypeId() === 'commerce_product_variation') {
+          // If purchased entity is a variation, get the parent product
+          $product = $purchased_entity->getProduct();
+        } elseif ($purchased_entity->getEntityTypeId() === 'commerce_product') {
+          // If purchased entity is already a product
+          $product = $purchased_entity;
+        }
+
         if (!$product || !$this->contactUpdater->isProductCivicrmEnabled($product)) {
           continue;
         }
 
+        $civicrm_enabled_items++;
         $settings = $this->contactUpdater->getProductSettings($product);
-        
+        $this->logger->info('Product settings for product @product_id: @settings', [
+          '@product_id' => $product->id(),
+          '@settings' => json_encode($settings),
+        ]);
+
         switch ($settings['entity']) {
           case 'contribution':
             $contribution_id = $this->contributionUpdater->createContributionFromOrder($order, $contact_id);
