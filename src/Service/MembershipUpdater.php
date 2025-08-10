@@ -114,6 +114,7 @@ class MembershipUpdater {
       // Create the membership
       $result = civicrm_api4('Membership', 'create', [
         'values' => $membership_data,
+        'checkPermissions' => FALSE,
       ]);
 
       if (!empty($result[0]['id'])) {
@@ -161,6 +162,7 @@ class MembershipUpdater {
           ['status_id:name', 'IN', ['New', 'Current', 'Grace']],
         ],
         'limit' => 1,
+        'checkPermissions' => FALSE,
       ]);
 
       return !empty($result[0]) ? $result[0] : NULL;
@@ -197,6 +199,7 @@ class MembershipUpdater {
       $result = civicrm_api4('Membership', 'update', [
         'where' => [['id', '=', $membership_id]],
         'values' => $update_data,
+        'checkPermissions' => FALSE,
       ]);
 
       if (!empty($result[0]['id'])) {
@@ -230,6 +233,7 @@ class MembershipUpdater {
         'select' => ['id', 'name', 'duration_unit', 'duration_interval', 'period_type'],
         'where' => [['id', '=', $membership_type_id]],
         'limit' => 1,
+        'checkPermissions' => FALSE,
       ]);
 
       return !empty($result[0]) ? $result[0] : NULL;
@@ -338,6 +342,7 @@ class MembershipUpdater {
       civicrm_api4('Membership', 'update', [
         'where' => [['id', '=', $membership_id]],
         'values' => ['status_id' => $this->getMembershipStatusId($status_name)],
+        'checkPermissions' => FALSE,
       ]);
 
       $this->logger->info('Updated membership @membership_id status to @status', [
@@ -411,6 +416,7 @@ class MembershipUpdater {
             'status_id' => $this->getMembershipStatusId('Current'),
             'source' => 'Commerce Order #' . $order->id() . ' (Renewal)',
           ],
+          'checkPermissions' => FALSE,
         ]);      if (!empty($result[0]['id'])) {
         $this->logger->info('Renewed CiviCRM membership @membership_id until @end_date', [
           '@membership_id' => $existing_membership['id'],
@@ -445,6 +451,7 @@ class MembershipUpdater {
         'select' => ['id', 'name', 'description'],
         'where' => [['is_active', '=', TRUE]],
         'orderBy' => ['name' => 'ASC'],
+        'checkPermissions' => FALSE,
       ]);
 
       $membership_types = ['' => t('- Select a membership type -')];
@@ -493,6 +500,7 @@ class MembershipUpdater {
           'status_id' => $this->getMembershipStatusId('Cancelled'),
           'source' => 'Commerce Order #' . $order->id() . ' (Cancelled)',
         ],
+        'checkPermissions' => FALSE,
       ]);
 
       if (!empty($result[0]['id'])) {
@@ -528,6 +536,7 @@ class MembershipUpdater {
         'select' => ['id', 'name', 'label'],
         'where' => [['is_active', '=', TRUE]],
         'orderBy' => ['weight' => 'ASC'],
+        'checkPermissions' => FALSE,
       ]);
 
       $statuses = [];
@@ -623,6 +632,7 @@ class MembershipUpdater {
       // Create the membership
       $result = civicrm_api4('Membership', 'create', [
         'values' => $membership_data,
+        'checkPermissions' => FALSE,
       ]);
 
       if (!empty($result[0]['id'])) {
@@ -683,6 +693,7 @@ class MembershipUpdater {
       $result = civicrm_api4('Membership', 'update', [
         'where' => [['id', '=', $membership_id]],
         'values' => $update_data,
+        'checkPermissions' => FALSE,
       ]);
 
       if (!empty($result[0]['id'])) {
@@ -743,6 +754,7 @@ class MembershipUpdater {
           'status_id' => $this->getMembershipStatusId('Cancelled'),
           'source' => 'Commerce Order #' . $order->id() . ' (Cancelled)',
         ],
+        'checkPermissions' => FALSE,
       ]);
 
       if (!empty($result[0]['id'])) {
@@ -780,6 +792,7 @@ class MembershipUpdater {
           ['is_active', '=', TRUE],
         ],
         'limit' => 1,
+        'checkPermissions' => FALSE,
       ]);
 
       if (!empty($result[0]['id'])) {

@@ -101,6 +101,7 @@ class MailingUpdater {
 
       $result = civicrm_api4('GroupContact', 'create', [
         'values' => $group_contact_data,
+        'checkPermissions' => FALSE,
       ]);
 
       if (!empty($result[0]['id'])) {
@@ -161,6 +162,7 @@ class MailingUpdater {
           ['contact_id', '=', $contact_id],
           ['group_id', '=', $mailing_group_id],
         ],
+        'checkPermissions' => FALSE,
       ]);
 
       $this->logger->info('Removed contact @contact_id from mailing group @group_id', [
@@ -200,6 +202,7 @@ class MailingUpdater {
           ['status', 'IN', ['Added', 'Pending']],
         ],
         'limit' => 1,
+        'checkPermissions' => FALSE,
       ]);
 
       return !empty($result[0]) ? $result[0] : NULL;
@@ -235,6 +238,7 @@ class MailingUpdater {
         'values' => [
           'status' => 'Added',
         ],
+        'checkPermissions' => FALSE,
       ]);
 
       $this->logger->info('Updated group membership for contact @contact_id in group @group_id', [
@@ -341,6 +345,7 @@ class MailingUpdater {
           ['group_type', 'CONTAINS', 'Mailing List'],
         ],
         'orderBy' => ['name' => 'ASC'],
+        'checkPermissions' => FALSE,
       ]);
 
       $groups = ['' => t('- Select a mailing group -')];
@@ -380,6 +385,7 @@ class MailingUpdater {
           ['is_active', '=', TRUE],
         ],
         'orderBy' => ['name' => 'ASC'],
+        'checkPermissions' => FALSE,
       ]);
 
       $groups = ['' => t('- Select a group -')];
@@ -496,6 +502,7 @@ class MailingUpdater {
         'where' => [
           ['group_id', '=', $mailing_group_id],
         ],
+        'checkPermissions' => FALSE,
       ]);
 
       $stats = [
@@ -599,6 +606,7 @@ class MailingUpdater {
         'values' => [
           'status' => 'Removed',
         ],
+        'checkPermissions' => FALSE,
       ]);
 
       $this->logger->info('Removed contact @contact_id from mailing group @group_id due to order @order_id', [
