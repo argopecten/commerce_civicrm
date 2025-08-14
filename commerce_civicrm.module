@@ -32,7 +32,7 @@ function commerce_civicrm_help($route_name, RouteMatchInterface $route_match) {
       $output .= '<li>' . t('Membership management with automatic creation and renewal') . '</li>';
       $output .= '<li>' . t('Event registration with customizable participant roles') . '</li>';
       $output .= '<li>' . t('Mailing list subscription with double opt-in and welcome messages') . '</li>';
-      $output .= '<li>' . t('Rules integration for advanced workflow automation') . '</li>';
+      $output .= '<li>' . t('Direct Commerce workflow integration for automatic processing') . '</li>';
       $output .= '<li>' . t('Views integration for displaying customer orders') . '</li>';
       $output .= '</ul>';
       
@@ -41,7 +41,6 @@ function commerce_civicrm_help($route_name, RouteMatchInterface $route_match) {
       $output .= '<li>' . t('CiviCRM module properly installed and configured') . '</li>';
       $output .= '<li>' . t('CiviCRM Tools module for modern API access') . '</li>';
       $output .= '<li>' . t('Drupal Commerce with Product, Order, and Payment modules') . '</li>';
-      $output .= '<li>' . t('Rules module for advanced automation (optional)') . '</li>';
       $output .= '</ul>';
       
       $output .= '<h3>' . t('Configuration') . '</h3>';
@@ -52,7 +51,6 @@ function commerce_civicrm_help($route_name, RouteMatchInterface $route_match) {
       $output .= '<li>' . t('Choose whether to create contributions, memberships, event registrations, or mailing subscriptions when the product is purchased.') . '</li>';
       $output .= '<li>' . t('Select the appropriate CiviCRM entity (Financial Type, Membership Type, Event, or Mailing Group).') . '</li>';
       $output .= '<li>' . t('Configure additional options like participant roles for events or mailing preferences.') . '</li>';
-      $output .= '<li>' . t('Configure Rules for advanced automation workflows if needed.') . '</li>';
       $output .= '</ol>';
       
       $output .= '<h3>' . t('Usage') . '</h3>';
@@ -66,15 +64,6 @@ function commerce_civicrm_help($route_name, RouteMatchInterface $route_match) {
       $output .= '<li>' . t('&nbsp;&nbsp;• <strong>Mailings:</strong> Mailing list subscriptions with optional double opt-in and welcome messages') . '</li>';
       $output .= '<li>' . t('All CiviCRM operations are logged for debugging and audit purposes.') . '</li>';
       $output .= '<li>' . t('Use the "My CiviCRM Orders" view to let customers see their order history.') . '</li>';
-      $output .= '</ul>';
-      
-      $output .= '<h3>' . t('Rules Integration') . '</h3>';
-      $output .= '<p>' . t('The module provides Rules actions for advanced workflows:') . '</p>';
-      $output .= '<ul>';
-      $output .= '<li>' . t('<strong>Add a CiviCRM Contribution:</strong> Create contributions with custom financial types') . '</li>';
-      $output .= '<li>' . t('<strong>Add a CiviCRM Membership:</strong> Create or renew memberships with specific types') . '</li>';
-      $output .= '<li>' . t('<strong>Add a CiviCRM Event Registration:</strong> Register users for events with participant roles') . '</li>';
-      $output .= '<li>' . t('<strong>Add to CiviCRM Mailing Group:</strong> Subscribe users to mailing groups with preferences') . '</li>';
       $output .= '</ul>';
       
       $output .= '<h3>' . t('Troubleshooting') . '</h3>';

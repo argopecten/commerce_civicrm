@@ -127,6 +127,5 @@ To verify configuration:
 
 ## Next Steps
 
-- [Order Processing](order-processing.md) - Understand how configured products are processed
-- [Extensions Overview](../extensions/overview.md) - Learn about advanced features
-- [Rules Integration](../extensions/rules.md) - Set up advanced workflows
+- [Order Processing](order-processing.md) - How orders are processed automatically
+- [Installation](installation.md) - Setup and configuration requirements

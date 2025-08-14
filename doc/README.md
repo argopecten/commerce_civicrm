@@ -14,7 +14,6 @@ This documentation provides comprehensive information about the Commerce CiviCRM
 - **[Extensions Overview](extensions/overview.md)** - New features and capabilities
 - **[Event Registration](extensions/events.md)** - Event registration functionality
 - **[Mailing Lists](extensions/mailing.md)** - Mailing list subscription features
-- **[Rules Integration](extensions/rules.md)** - Advanced workflow automation
 
 ### Service Architecture
 - **[Service Overview](services/overview.md)** - Architecture and service organization

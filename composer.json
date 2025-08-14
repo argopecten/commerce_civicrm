@@ -12,8 +12,7 @@
     "integration",
     "membership",
     "contribution",
-    "event",
-    "rules"
+    "event"
   ],
   "authors": [
     {
@@ -44,9 +43,6 @@
     "drupal/core-dev": "^10.3 || ^11.0",
     "phpunit/phpunit": "^9.5",
     "squizlabs/php_codesniffer": "^3.6"
-  },
-  "suggest": {
-    "drupal/rules": "^3.0 - Required for advanced automation and Rules integration features"
   },
   "config": {
     "sort-packages": true,

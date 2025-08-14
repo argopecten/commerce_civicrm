@@ -11,7 +11,6 @@ The Commerce CiviCRM module provides seamless integration between Drupal Commerc
 - Drupal Commerce (commerce_product, commerce_order, commerce_payment)
 - Profile module (for customer data)
 - State Machine module (for order state transitions)
-- Rules module (optional, for advanced automation)
 
 ## Installation
 

@@ -1,8 +1,10 @@
-# Commerce CiviCRM - Rules Actions Documentation
+# Commerce CiviCRM - Rules Actions Documentation (Optional)
 
 ## Overview
 
-The Commerce CiviCRM module provides comprehensive Rules integration with four dedicated Rules actions for CiviCRM operations. These actions enable advanced workflow automation beyond the standard product-based integration.
+**Note: Rules integration is optional.** The Commerce CiviCRM module works fully without the Rules module using direct Commerce integration. This documentation is for users who want to add the Rules module for advanced workflow automation.
+
+The Commerce CiviCRM module provides optional Rules integration with four dedicated Rules actions for CiviCRM operations. These actions enable advanced workflow automation beyond the standard product-based integration.
 
 ## Available Rules Actions
 

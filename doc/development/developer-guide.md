@@ -69,42 +69,6 @@ services:
     arguments: ['@my_module.enhanced_contact_updater.inner', '@my_custom_service']
 ```
 
-### Custom Rules Actions
-
-Create custom Rules actions for specific workflows:
-
-```php
-namespace Drupal\my_module\Plugin\RulesAction;
-
-use Drupal\rules\Core\RulesActionBase;
-
-/**
- * Provides a custom CiviCRM action.
- *
- * @RulesAction(
- *   id = "my_module_custom_civicrm_action",
- *   label = @Translation("Custom CiviCRM Action"),
- *   category = @Translation("CiviCRM"),
- *   context_definitions = {
- *     "user" = @ContextDefinition("entity:user",
- *       label = @Translation("User"),
- *       description = @Translation("The user to process.")
- *     ),
- *   }
- * )
- */
-class CustomCivicrmAction extends RulesActionBase {
-  
-  public function doExecute(UserInterface $user) {
-    // Custom action logic
-    $contact_updater = \Drupal::service('commerce_civicrm.contact_updater');
-    $contact_id = $contact_updater->getContactIdByUser($user);
-    
-    // Perform custom CiviCRM operations
-  }
-}
-```
-
 ### Event Subscribers
 
 Create event subscribers to extend order processing:
@@ -469,7 +433,7 @@ When contributing to the module:
 
 ### Code Examples
 - Check existing services for patterns
-- Review Rules actions for implementation examples
+- Review service implementations for best practices
 - Study event subscribers for workflow integration
 
 The Commerce CiviCRM module provides a robust foundation for CiviCRM integration that can be extended to meet specific business requirements while maintaining code quality and performance.

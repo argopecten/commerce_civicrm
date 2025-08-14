@@ -40,15 +40,9 @@ When customers purchase products configured for mailing subscriptions:
    - **Update Existing**: Update existing subscriber information
 6. Save the product
 
-## Rules Integration
+## Service Architecture
 
-The module provides comprehensive Rules actions for advanced workflow automation:
-
-### Available Rules Actions:
-1. **Add a CiviCRM Contribution** - Create contributions with custom financial types
-2. **Add a CiviCRM Membership** - Create or renew memberships with specific types
-3. **Add a CiviCRM Event Registration** - Register users for events with participant roles
-4. **Add to CiviCRM Mailing Group** - Subscribe users to mailing groups with preferences
+The module uses a service-based architecture with dependency injection for all CiviCRM operations:
 
 ### Features:
 - Automatic contact management and creation
@@ -57,7 +51,7 @@ The module provides comprehensive Rules actions for advanced workflow automation
 - Support for all CiviCRM entity types
 - Flexible parameter configuration
 
-See `RULES_ACTIONS.md` for detailed documentation and examples.
+The module provides a clean, direct Commerce integration without external dependencies.
 
 ### New Service Methods
 

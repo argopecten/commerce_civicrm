@@ -138,8 +138,8 @@ $results = $this->orderCivicrmUpdater->processCompletedOrder($order);
 $results = $this->orderCivicrmUpdater->processCompletedOrder($order);
 ```
 
-### Rules Integration
-Can also be called from Rules actions for custom workflow processing.
+> ### Custom Integration
+> Can also be called from custom code for advanced workflow processing.
 
 ## Performance Considerations
 

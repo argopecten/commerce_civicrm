@@ -1,24 +1,20 @@
 # This file defines the services provided by the Commerce CiviCRM module.
+# Direct Commerce-to-CiviCRM integration without Rules dependency.
 services:
 
-  ### Defines the event subscriber for processing completed orders.
+  ### Event Subscriber for Direct Commerce Integration
+  # Listens to Commerce order workflow transitions and processes CiviCRM updates
   commerce_civicrm.order_complete_subscriber:
-    # The class that contains the subscriber logic.
     class: Drupal\commerce_civicrm\EventSubscriber\OrderCompleteSubscriber
-    # Services to be injected into the subscriber's constructor.
-    # order_civicrm_updater, as the orchestrator service handle all CiviCRM updates when an order is completed
-    arguments: ['@logger.factory', '@entity_type.manager', '@commerce_civicrm.order_civicrm_updater']
-    # Tag the service as an event subscriber so Drupal knows to register it.
+    arguments: 
+      - '@logger.factory'
+      - '@entity_type.manager'
+      - '@commerce_civicrm.order_civicrm_updater'
     tags:
       - { name: event_subscriber }
 
-  ### Services for updating CiviCRM entities from Commerce Orders
+  ### Core CiviCRM Integration Services
   # Orchestrator service that coordinates all CiviCRM updates from Commerce Orders
-  # Each updater service has access to:
-  #   @entity_type.manager - For handling Drupal entities (orders, customers, etc.)
-  #   @logger.factory - For logging operations and debugging
-  # The orchestrator service (order_civicrm_updater) receives all five updater services as dependencies,
-  # allowing it to coordinate the complete CiviCRM update process
   commerce_civicrm.order_civicrm_updater:
     class: Drupal\commerce_civicrm\Service\OrderCivicrmUpdater
     arguments:
@@ -51,9 +47,9 @@ services:
     tags:
       - { name: service }
 
-  # Service for updating CiviCRM events based on Commerce Order data
-  commerce_civicrm.event_updater:
-    class: Drupal\commerce_civicrm\Service\EventUpdater
+  # Service for updating CiviCRM memberships based on Commerce Order data
+  commerce_civicrm.membership_updater:
+    class: Drupal\commerce_civicrm\Service\MembershipUpdater
     arguments:
       - '@entity_type.manager'
       - '@logger.factory'
@@ -61,9 +57,9 @@ services:
     tags:
       - { name: service }
 
-  # Service for updating CiviCRM memberships based on Commerce Order data
-  commerce_civicrm.membership_updater:
-    class: Drupal\commerce_civicrm\Service\MembershipUpdater
+  # Service for updating CiviCRM events based on Commerce Order data
+  commerce_civicrm.event_updater:
+    class: Drupal\commerce_civicrm\Service\EventUpdater
     arguments:
       - '@entity_type.manager'
       - '@logger.factory'

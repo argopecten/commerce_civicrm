@@ -12,7 +12,7 @@ A comprehensive Drupal module that provides seamless integration between Drupal 
 
 ### Advanced Capabilities
 - **🔄 Automatic Contact Synchronization**: Creates and updates CiviCRM contacts from Commerce profiles
-- **⚙️ Rules Integration**: Four dedicated Rules actions for custom workflow automation
+- **⚡ Direct Event Integration**: Native Commerce workflow integration without external dependencies
 - **🏗️ Service-Based Architecture**: Modern, maintainable code using Drupal's service container
 - **📊 Comprehensive Logging**: Detailed logging for debugging and audit trails
 - **🛡️ Error Handling**: Graceful error handling with duplicate prevention
@@ -40,7 +40,7 @@ Comprehensive documentation organized by topic and audience.
 - **Drupal**: 10.3+ or 11.x
 - **CiviCRM**: Latest stable version
 - **Commerce**: Latest stable version
-- **Dependencies**: Profile, State Machine, Rules (optional)
+- **Dependencies**: Profile, State Machine
 
 ## Integration Types
 
@@ -72,14 +72,12 @@ When orders are completed, the module automatically:
 4. **📅 Event Registration** - Registers for events
 5. **📧 Mailing Subscriptions** - Adds to mailing groups
 
-## Rules Integration
+## Getting Started
 
-Four dedicated Rules actions for advanced automation:
-
-- **Add CiviCRM Contribution** - Custom contribution workflows
-- **Add CiviCRM Membership** - Conditional membership creation
-- **Add CiviCRM Event Registration** - Dynamic event registration
-- **Add to CiviCRM Mailing Group** - Smart mailing subscriptions
+1. Install and configure CiviCRM
+2. Install and enable Commerce CiviCRM module
+3. Configure products with CiviCRM integration settings
+4. Process orders to automatically create CiviCRM records
 
 ## Error Handling & Monitoring
 

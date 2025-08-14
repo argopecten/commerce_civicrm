@@ -154,9 +154,9 @@ $order_updater = \Drupal::service('commerce_civicrm.order_civicrm_updater');
 $results = $order_updater->processCompletedOrder($order);
 ```
 
-### In Rules Actions
+### In Custom Code
 ```php
-// Get specific services for Rules actions
+// Get specific services for custom integrations
 $contact_updater = \Drupal::service('commerce_civicrm.contact_updater');
 $membership_updater = \Drupal::service('commerce_civicrm.membership_updater');
 
@@ -246,7 +246,9 @@ Adding support for new CiviCRM entities:
 1. **Create Service**: Implement new updater service
 2. **Register Service**: Add to services.yml
 3. **Update Orchestrator**: Modify OrderCivicrmUpdater
-4. **Add Rules Action**: Create corresponding Rules action
+4. **Add Configuration**: Update product form if needed
+
+```
 
 ### Service Decoration
 Extend existing services without modification:
