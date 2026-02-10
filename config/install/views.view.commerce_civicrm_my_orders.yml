@@ -5,7 +5,7 @@ dependencies:
     - commerce_order
     - options
     - user
-id: my-orders
+id: commerce_civicrm_my_orders
 label: 'My orders'
 module: commerce_civicrm
 description: ''
@@ -28,7 +28,6 @@ display:
           relationship: none
           group_type: group
           admin_label: ''
-          entity_type: null
           entity_field: order_number
           plugin_id: field
           label: 'Order ID'
@@ -360,8 +359,9 @@ display:
           sort_asc_label: Asc
           sort_desc_label: Desc
       access:
-        type: none
-        options: {  }
+        type: perm
+        options:
+          perm: 'view own commerce_order'
       cache:
         type: tag
         options: {  }

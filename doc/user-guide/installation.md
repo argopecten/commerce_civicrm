@@ -2,56 +2,91 @@
 
 ## Overview
 
-The Commerce CiviCRM module provides seamless integration between Drupal Commerce and CiviCRM, automatically creating and updating CiviCRM records when customers complete orders.
+The Commerce CiviCRM module integrates Drupal Commerce with CiviCRM, enabling
+automatic CiviCRM record creation when customers complete orders. Products are
+configured through a built-in UI that stores CiviCRM settings as JSON in a
+single `field_civicrm` field.
 
 ## Requirements
 
-- Drupal 10.3+ or 11.x
-- CiviCRM module (civicrm:civicrm)
-- Drupal Commerce (commerce_product, commerce_order, commerce_payment)
-- Profile module (for customer data)
-- State Machine module (for order state transitions)
+| Package | Version |
+|---------|---------|
+| **PHP** | >= 8.3 |
+| **Drupal core** | ^11.0 |
+| **Drupal Commerce** | ^3.0 |
+| **CiviCRM** | ^6.1 (tested with 6.1.0–6.2.0) |
+| **Profile** | ^1.2 |
+| **State Machine** | ^1.5 |
+
+The module also depends on `commerce_product`, `commerce_order`,
+`commerce_payment`, and `user` (declared in `commerce_civicrm.info.yml`).
 
 ## Installation
 
-1. Download and install the module in your Drupal site
-2. Enable the module: `drush en commerce_civicrm`
-3. The module will automatically:
-   - Create the required `field_civicrm` field on all existing product types
-   - Add the field to any new product types created after installation
-4. Configure CiviCRM integration on individual products
+### Step 1 — Install the Module
 
-## Automatic Field Management
+```bash
+composer require drupal/commerce_civicrm
+drush en commerce_civicrm
+```
 
-The module automatically handles the required CiviCRM integration field:
+### Step 2 — Automatic Setup
 
-- **During Installation**: The `field_civicrm` field is automatically added to all existing Commerce product types
-- **For New Product Types**: When you create new product types after installation, the field is automatically added via `hook_commerce_product_type_insert()`
-- **Manual Management**: Helper functions are available for troubleshooting or manual field management:
-  - `commerce_civicrm_add_field_to_product_type($bundle)` - Add field to specific product type
-  - `commerce_civicrm_add_field_to_all_product_types()` - Add field to all existing product types
+On installation the module automatically:
 
-The field is hidden by default in form and view displays to keep the product interface clean, but administrators can show it through the standard Drupal field UI if needed.
+1. **Adds `field_civicrm`** (a `text_long` JSON field) to all existing Commerce
+   product types. The field is hidden from form and view displays — configuration
+   happens through the dedicated CiviCRM UI section on product edit forms.
+2. **Provisions CiviCRM custom fields** — creates a `Commerce_Order` custom group
+   on the `Contribution` entity with a `commerce_order_id` integer field, used for
+   order-to-contribution cross-referencing.
+3. **Registers event subscribers** for Commerce order workflow transitions
+   (`place`, `validate`, `fulfill`, `cancel`).
 
-## Initial Configuration
+New product types created after installation automatically receive the
+`field_civicrm` field via `hook_commerce_product_type_insert()`.
 
-After installation:
+### Step 3 — Verify
 
-1. **Verify CiviCRM Connection**: Check that CiviCRM is properly configured and accessible
-2. **Test Field Addition**: Confirm that existing product types have the CiviCRM field
-3. **Create Test Product**: Set up a test product with CiviCRM integration enabled
-4. **Process Test Order**: Complete a test order and verify CiviCRM records are created
-5. **Review Logs**: Check logs at `/admin/reports/dblog` for any issues
+1. **Check status page** (`/admin/reports/status`) — the module reports CiviCRM
+   availability and maintenance mode status.
+2. **Edit any product** — a "CiviCRM Integration" section should appear in the
+   Advanced sidebar.
+3. **Review logs** at `/admin/reports/dblog` (filter by `commerce_civicrm`).
 
-## Permissions
+## Post-Install Configuration
 
-The module uses existing Commerce and CiviCRM permissions. Ensure users have appropriate permissions for:
-- Commerce order processing
-- CiviCRM contact access
-- Product configuration (for administrators)
+### Verify CiviCRM Connection
+
+The module checks CiviCRM availability at runtime via `CivicrmHelper::isAvailable()`.
+If CiviCRM is in maintenance mode (upgrade active or environment set to
+`Maintenance`), the module logs a warning and skips processing — orders still
+complete normally in Commerce.
+
+### Permissions
+
+The module uses existing Commerce and CiviCRM permissions:
+
+- **Commerce order processing** — standard Commerce roles
+- **Product configuration** — users who can edit products see the CiviCRM settings
+- **CiviCRM API access** — the module uses `checkPermissions(FALSE)` on all API4
+  calls, so no additional CiviCRM permissions are needed for the integration itself
+
+## Uninstallation
+
+```bash
+drush pm:uninstall commerce_civicrm
+```
+
+On uninstall the module:
+
+1. Removes `field_civicrm` field instances and storage from all product types
+2. Deletes the CiviCRM `Commerce_Order` custom group and its fields
+3. Removes module configuration and the `commerce_civicrm_my_orders` view
+4. Clears relevant caches
 
 ## Next Steps
 
-- [Product Configuration](product-configuration.md) - Configure products for CiviCRM integration
-- [Order Processing](order-processing.md) - Understand how orders are processed
-- [Extensions Overview](../extensions/overview.md) - Learn about advanced features
+- [Product Configuration](product-configuration.md) — configure CiviCRM settings on products
+- [Order Processing](order-processing.md) — understand the automatic processing workflow
+- [Services Overview](../services/overview.md) — technical service architecture

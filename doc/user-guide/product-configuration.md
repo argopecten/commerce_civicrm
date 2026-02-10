@@ -2,130 +2,175 @@
 
 ## Overview
 
-Products can be configured to automatically trigger CiviCRM operations when purchased. The module supports four types of CiviCRM integration:
+Each Commerce product can be configured to trigger CiviCRM operations when
+purchased. Configuration is done through a "CiviCRM Integration" section on the
+product edit form that stores settings as JSON in a single `field_civicrm` field.
 
-1. **Contributions** - Creates financial records
-2. **Memberships** - Creates or renews memberships
-3. **Events** - Registers customers for events
-4. **Mailing Lists** - Subscribes customers to mailing groups
+The module supports four entity types:
 
-## Configuration Steps
+| Entity Type | CiviCRM Record Created | Status |
+|-------------|----------------------|--------|
+| **Contribution** | `Contribution` with specified financial type | Fully working |
+| **Membership** | `Membership` with specified type (optionally linked to a contribution) | Fully working |
+| **Mailing** | `GroupContact` subscription to a mailing group | Fully working |
+| **Event** | `Participant` registration | Form UI works; backend processing not yet implemented |
 
-### Basic Configuration
+## Configuration UI
 
-1. Edit any Commerce product
-2. Scroll to the "CiviCRM Integration" section
-3. Enable CiviCRM integration
-4. Choose the integration type
+When editing a product, the **CiviCRM Integration** section appears in the
+Advanced sidebar (provided by `ProductFormHelper`).
 
-### Integration Types
+### Common Settings
 
-#### Contribution Integration
-- **Purpose**: Creates a CiviCRM contribution when the product is purchased
-- **Configuration**: Select the CiviCRM Financial Type
-- **Use Case**: Donations, membership fees, event fees
+All entity types share:
 
-#### Membership Integration
-- **Purpose**: Creates or renews a CiviCRM membership
-- **Configuration**: Select the CiviCRM Membership Type
-- **Use Case**: Annual memberships, subscription services
+- **Enable CiviCRM processing** — checkbox to activate/deactivate integration
+  for this product
+- **CiviCRM entity type** — dropdown: Contribution, Membership, Event, or
+  Mailing
 
-#### Event Registration
-- **Purpose**: Registers the customer for a CiviCRM event
-- **Configuration**: 
-  - Select the target CiviCRM event
-  - Choose the participant role
-- **Use Case**: Conference registration, workshop enrollment
+### Contribution Settings
 
-#### Mailing List Subscription
-- **Purpose**: Adds the customer to a CiviCRM mailing group
-- **Configuration**:
-  - Select the target mailing group
-  - Configure subscription preferences:
-    - **Double Opt-in**: Require email confirmation
-    - **Welcome Message**: Send welcome email to new subscribers
-    - **Update Existing**: Update existing subscriber information
-- **Use Case**: Newsletter subscriptions, marketing lists
+When entity type is set to **Contribution**:
 
-## Field Structure
+- **Financial type** — dropdown populated from CiviCRM active financial types
+  (sorted by label). Sets the `financial_type_id` on the created contribution.
 
-The CiviCRM configuration is stored in a JSON field with this structure:
+### Membership Settings
+
+When entity type is set to **Membership**:
+
+- **Membership type** — dropdown populated from CiviCRM active membership types
+  (sorted by label). Sets the `membership_type_id` for membership creation.
+
+If a product has **both** a membership type and a financial type configured
+(by also selecting the financial type), the module creates a **linked
+membership + contribution** using the CiviCRM Order API in a single atomic
+transaction.
+
+### Event Settings
+
+When entity type is set to **Event**:
+
+- **Event** — dropdown populated from CiviCRM active events
+- **Participant role** — dropdown populated from CiviCRM active participant roles
+
+> **Note**: Event registration is configured in the UI but the backend
+> processing (`Participant::create()`) is not yet implemented. Event products
+> will be silently skipped during order processing. See
+> [FMO #32](../fmo/32-advanced-civicrm-integration.md) §4 for details.
+
+### Mailing Settings
+
+When entity type is set to **Mailing**:
+
+- **Mailing group** — dropdown populated from CiviCRM active mailing groups
+- **Mailing preferences** — checkboxes:
+  - Double opt-in (sets `GroupContact` status to `Pending` instead of `Added`)
+  - Send welcome message (stub — logs only, not yet sending actual emails)
+  - Update existing subscriptions
+
+## How Configuration Is Stored
+
+All settings are serialized as a JSON object in the `field_civicrm` field on the
+product entity. The field is a `text_long` type, hidden from standard form and
+view displays.
+
+Example JSON for a membership product with linked contribution:
 
 ```json
 {
   "enabled": true,
-  "entity": "contribution",
-  "entity_id": "1"
+  "entity": "membership",
+  "entity_id": 2,
+  "financial_type_id": 2
 }
 ```
 
-### Event Registration Example
-```json
-{
-  "enabled": true,
-  "entity": "event",
-  "entity_id": "5",
-  "participant_role_id": "1"
-}
-```
+Example for a mailing subscription:
 
-### Mailing Subscription Example
 ```json
 {
   "enabled": true,
   "entity": "mailing",
-  "entity_id": "3",
+  "entity_id": 5,
   "mailing_preferences": {
-    "double_opt_in": "double_opt_in",
-    "send_welcome": "send_welcome"
+    "double_opt_in": true,
+    "send_welcome": true,
+    "update_existing": false
   }
 }
 ```
 
+You do not need to edit this JSON directly — the product form UI handles
+serialization automatically via `ProductFormHelper`.
+
+## Configuration Examples
+
+### Membership with Linked Contribution
+
+Creates both a CiviCRM membership and a contribution in one Order API call:
+
+1. Edit the product
+2. Set entity type to **Membership**
+3. Select the membership type (e.g., "General Member")
+4. Also select a financial type (e.g., "Member Dues")
+5. Enable CiviCRM processing
+6. Save
+
+**Result**: On purchase, creates a `Membership` + `Contribution` + `LineItem` +
+`MembershipPayment` atomically. CiviCRM handles renewal detection, date
+calculation, and status management.
+
+### Standalone Donation
+
+Creates only a CiviCRM contribution:
+
+1. Edit the product
+2. Set entity type to **Contribution**
+3. Select financial type "Donation"
+4. Enable CiviCRM processing
+5. Save
+
+**Result**: On purchase, creates a `Contribution` with the order amount, currency,
+and `source` set to `Commerce Order #<id>`.
+
+### Mailing Subscription
+
+Adds the customer's CiviCRM contact to a mailing group:
+
+1. Edit the product
+2. Set entity type to **Mailing**
+3. Select the mailing group
+4. Optionally enable double opt-in and/or welcome message
+5. Enable CiviCRM processing
+6. Save
+
+**Result**: On purchase, creates or updates a `GroupContact` record.
+
 ## Best Practices
 
-### Product Organization
-- Use clear product names that indicate CiviCRM integration
-- Group related products (e.g., different membership levels)
-- Document your CiviCRM entity IDs for reference
-
-### Testing
-- Always test new product configurations in a development environment
-- Verify CiviCRM records are created correctly
-- Check that customer data flows properly
-
-### Maintenance
-- Keep CiviCRM entity IDs updated if they change
-- Monitor logs for configuration issues
-- Review and update mailing preferences as needed
+- **Test each product** after configuration by placing a test order
+- **Check logs** at `/admin/reports/dblog` (filter by `commerce_civicrm`) to
+  verify records were created
+- **Use meaningful labels** — the dropdowns show CiviCRM `label` values (not
+  internal `name` values), so multi-language CiviCRM sites see translated labels
+- **One entity type per product** — though the form supports only one entity type
+  selection, a membership product with a financial type creates linked records
+- **Verify CiviCRM IDs** — if you change membership types or financial types in
+  CiviCRM, update or re-save affected products
 
 ## Troubleshooting
 
-### Common Issues
-
-1. **CiviCRM Integration section not visible**
-   - Verify the field was added during installation
-   - Check field permissions and display settings
-
-2. **Entity options not loading**
-   - Verify CiviCRM is properly configured
-   - Check CiviCRM database connectivity
-   - Review error logs
-
-3. **Records not created on purchase**
-   - Verify product configuration is saved
-   - Check order completion workflow
-   - Review processing logs
-
-### Validation
-
-To verify configuration:
-1. Save the product and reload the edit form
-2. Confirm the settings are preserved
-3. Process a test order
-4. Check CiviCRM for the created records
+- **Dropdowns are empty** — CiviCRM may be unavailable or in maintenance mode.
+  Check `/admin/reports/status`.
+- **Settings don't save** — verify the `field_civicrm` field exists on the product
+  type. Run `commerce_civicrm_add_field_to_product_type('your_bundle')` if needed.
+- **No CiviCRM records created** — see [Order Processing](order-processing.md)
+  and [Troubleshooting](troubleshooting.md).
 
 ## Next Steps
 
-- [Order Processing](order-processing.md) - How orders are processed automatically
-- [Installation](installation.md) - Setup and configuration requirements
+- [Order Processing](order-processing.md) — understand what happens when an order
+  is placed
+- [Services Overview](../services/overview.md) — technical service architecture

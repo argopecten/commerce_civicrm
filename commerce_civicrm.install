@@ -1,54 +1,54 @@
 <?php
 
+use Drupal\Core\Extension\Requirement\RequirementSeverity;
+
 /**
  * @file
  * Install, update and uninstall functions for the Commerce CiviCRM module.
  */
 
 /**
- * Implements hook_requirements().
+ * Implements hook_runtime_requirements().
  */
-function commerce_civicrm_requirements($phase) {
+function commerce_civicrm_runtime_requirements() {
   $requirements = [];
   
-  if ($phase === 'runtime') {
-    // Check if CiviCRM module is enabled
-    if (!\Drupal::hasService('civicrm')) {
-      $requirements['commerce_civicrm_civicrm'] = [
-        'title' => t('Commerce CiviCRM - CiviCRM Module'),
-        'description' => t('CiviCRM module is required but not enabled.'),
-        'severity' => REQUIREMENT_ERROR,
-        'value' => t('Not available'),
-      ];
-    }
-    
-    // Check if CiviCRM is properly configured
-    if (\Drupal::hasService('commerce_civicrm.civicrm_helper')) {
-      try {
-        $helper = \Drupal::service('commerce_civicrm.civicrm_helper');
-        if ($helper->isAvailable()) {
-          $requirements['commerce_civicrm_status'] = [
-            'title' => t('Commerce CiviCRM - CiviCRM Status'),
-            'description' => t('CiviCRM is properly configured and available.'),
-            'severity' => REQUIREMENT_OK,
-            'value' => t('Available'),
-          ];
-        } else {
-          $requirements['commerce_civicrm_status'] = [
-            'title' => t('Commerce CiviCRM - CiviCRM Status'),
-            'description' => t('CiviCRM is not properly configured or not accessible.'),
-            'severity' => REQUIREMENT_WARNING,
-            'value' => t('Not accessible'),
-          ];
-        }
-      } catch (\Exception $e) {
+  // Check if CiviCRM module is enabled
+  if (!\Drupal::hasService('civicrm')) {
+    $requirements['commerce_civicrm_civicrm'] = [
+      'title' => t('Commerce CiviCRM - CiviCRM Module'),
+      'description' => t('CiviCRM module is required but not enabled.'),
+      'severity' => RequirementSeverity::Error,
+      'value' => t('Not available'),
+    ];
+  }
+  
+  // Check if CiviCRM is properly configured
+  if (\Drupal::hasService('commerce_civicrm.civicrm_helper')) {
+    try {
+      $helper = \Drupal::service('commerce_civicrm.civicrm_helper');
+      if ($helper->isAvailable()) {
         $requirements['commerce_civicrm_status'] = [
           'title' => t('Commerce CiviCRM - CiviCRM Status'),
-          'description' => t('Error checking CiviCRM status: @error', ['@error' => $e->getMessage()]),
-          'severity' => REQUIREMENT_ERROR,
-          'value' => t('Error'),
+          'description' => t('CiviCRM is properly configured and available.'),
+          'severity' => RequirementSeverity::OK,
+          'value' => t('Available'),
+        ];
+      } else {
+        $requirements['commerce_civicrm_status'] = [
+          'title' => t('Commerce CiviCRM - CiviCRM Status'),
+          'description' => t('CiviCRM is not properly configured or not accessible.'),
+          'severity' => RequirementSeverity::Warning,
+          'value' => t('Not accessible'),
         ];
       }
+    } catch (\CRM_Core_Exception $e) {
+      $requirements['commerce_civicrm_status'] = [
+        'title' => t('Commerce CiviCRM - CiviCRM Status'),
+        'description' => t('Error checking CiviCRM status: @error', ['@error' => $e->getMessage()]),
+        'severity' => RequirementSeverity::Error,
+        'value' => t('Error'),
+      ];
     }
   }
   
@@ -64,7 +64,7 @@ function commerce_civicrm_uninstall() {
   // List of configuration objects to delete.
   $config_names = [
     'commerce_civicrm.settings',
-    'views.view.commerce_civicrm_orders_by_user',
+    'views.view.commerce_civicrm_my_orders',
   ];
 
   // Delete configuration objects.
@@ -96,6 +96,22 @@ function commerce_civicrm_uninstall() {
     $storage->delete();
   }
 
+  // Remove CiviCRM custom fields.
+  try {
+    if (\Drupal::hasService('commerce_civicrm.civicrm_helper')) {
+      $helper = \Drupal::service('commerce_civicrm.civicrm_helper');
+      if ($helper->initialize()) {
+        \Civi\Api4\CustomGroup::delete(FALSE)
+          ->addWhere('name', '=', 'Commerce_Order')
+          ->execute();
+      }
+    }
+  } catch (\CRM_Core_Exception $e) {
+    \Drupal::logger('commerce_civicrm')->warning('Could not remove CiviCRM custom fields during uninstall: @message', [
+      '@message' => $e->getMessage(),
+    ]);
+  }
+
   // Clear relevant caches to ensure clean removal.
   \Drupal::cache('discovery')->deleteAll();
   \Drupal::cache('config')->deleteAll();
@@ -125,5 +141,68 @@ function commerce_civicrm_install() {
   
   if (empty($results['success']) && empty($results['failed'])) {
     \Drupal::messenger()->addMessage(t('No product types found. The CiviCRM field will be automatically added to new product types as they are created.'));
+  }
+
+  // Provision CiviCRM custom fields for order-to-contribution linking.
+  _commerce_civicrm_provision_custom_fields();
+}
+
+/**
+ * Creates the Commerce_Order custom group and field in CiviCRM.
+ *
+ * @return bool
+ *   TRUE if the custom field exists or was created, FALSE on failure.
+ */
+function _commerce_civicrm_provision_custom_fields() {
+  try {
+    if (!\Drupal::hasService('commerce_civicrm.civicrm_helper')) {
+      \Drupal::logger('commerce_civicrm')->warning('CiviCRM helper not available during install — custom fields not provisioned. They will be created on first use.');
+      return FALSE;
+    }
+
+    $helper = \Drupal::service('commerce_civicrm.civicrm_helper');
+    if (!$helper->initialize()) {
+      \Drupal::logger('commerce_civicrm')->warning('CiviCRM not available during install — custom fields not provisioned.');
+      return FALSE;
+    }
+
+    $existing = \Civi\Api4\CustomGroup::get(FALSE)
+      ->addWhere('name', '=', 'Commerce_Order')
+      ->setLimit(1)
+      ->execute();
+
+    if ($existing->count() > 0) {
+      \Drupal::logger('commerce_civicrm')->info('Commerce_Order custom group already exists — skipping creation.');
+      return TRUE;
+    }
+
+    \Civi\Api4\CustomGroup::create(FALSE)
+      ->addValue('name', 'Commerce_Order')
+      ->addValue('title', 'Commerce Order')
+      ->addValue('extends', 'Contribution')
+      ->addValue('style', 'Inline')
+      ->addValue('is_active', TRUE)
+      ->addValue('collapse_display', TRUE)
+      ->execute();
+
+    \Civi\Api4\CustomField::create(FALSE)
+      ->addValue('custom_group_id:name', 'Commerce_Order')
+      ->addValue('name', 'commerce_order_id')
+      ->addValue('label', 'Commerce Order ID')
+      ->addValue('data_type', 'Int')
+      ->addValue('html_type', 'Text')
+      ->addValue('is_searchable', TRUE)
+      ->addValue('is_active', TRUE)
+      ->addValue('is_required', FALSE)
+      ->addValue('is_view', TRUE)
+      ->execute();
+
+    \Drupal::logger('commerce_civicrm')->info('Commerce_Order custom group and field provisioned successfully.');
+    return TRUE;
+  } catch (\CRM_Core_Exception $e) {
+    \Drupal::logger('commerce_civicrm')->error('Failed to provision CiviCRM custom fields: @message', [
+      '@message' => $e->getMessage(),
+    ]);
+    return FALSE;
   }
 }

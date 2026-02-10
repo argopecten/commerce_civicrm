@@ -2,177 +2,208 @@
 
 ## Overview
 
-When customers complete orders, the module automatically processes CiviCRM integration based on the products in their cart. The processing happens through Drupal's event system and follows a specific workflow.
+When a customer completes an order, the module automatically creates CiviCRM
+records based on each product's configuration. Processing is triggered by
+Commerce workflow transitions and handled entirely in the background — the
+customer sees a normal order confirmation regardless of CiviCRM outcomes.
 
-## Processing Workflow
+## Workflow Transitions
 
-### Event Triggers
-The module processes orders when they transition through specific workflow states:
+`OrderCompleteSubscriber` listens to four Commerce `post_transition` events
+(all at priority `-50`):
 
-| Transition | From State | To State | Processing Type |
-|------------|------------|----------|-----------------|
-| **Place** | draft | completed | Full CiviCRM processing |
-| **Validate** | validation | any | Full CiviCRM processing |
-| **Cancel** | any | canceled | Cancellation handling |
-| **Fulfill** | fulfillment | any | Fulfillment handling |
+| Handler | Event | State Guard | Calls |
+|---------|-------|-------------|-------|
+| `onOrderPlace()` | `commerce_order.place.post_transition` | Only `draft → completed` | `processOrder()` |
+| `onOrderValidate()` | `commerce_order.validate.post_transition` | None — processes unconditionally | `processOrder()` |
+| `onOrderFulfill()` | `commerce_order.fulfill.post_transition` | None — processes unconditionally | `processOrder()` |
+| `onOrderCancel()` | `commerce_order.cancel.post_transition` | Only transitions to `canceled` | `processCancellation()` |
 
-#### State Validation
-Each transition handler validates the from/to states to ensure appropriate processing:
-- **Place**: Only processes when transitioning FROM 'draft' state
-- **Cancel**: Only processes when transitioning TO 'canceled' state  
-- **Validate**: Only processes when transitioning FROM 'validation' state (to any destination state)
-- **Fulfill**: Only processes when transitioning FROM 'fulfillment' state (to any destination state)
+### Which Handlers Fire Per Workflow
 
-### Processing Steps
+| Commerce Workflow | Transitions | Handlers That Fire |
+|-------------------|------------|-------------------|
+| **Default** (`order_default`) | draft → completed | `onOrderPlace` only |
+| **Fulfillment** (`order_default_validation`) | draft → validation → fulfillment → completed | `onOrderPlace` (skipped: to≠completed), `onOrderValidate`, `onOrderFulfill` |
 
-1. **Order Workflow Transition**: Order undergoes a monitored transition (place, validate, cancel, fulfill)
-2. **State Validation**: Subscriber validates that the transition matches expected from/to states
-3. **CiviCRM Integration Check**: System checks if order items have CiviCRM integration enabled
-4. **Contact Processing**: Creates or updates CiviCRM contact from billing profile (for place/validate events)
-5. **Product Analysis**: Reviews each order item for CiviCRM configuration (for place/validate events)
-6. **Entity Creation**: Creates appropriate CiviCRM records based on product settings (for place/validate events)
-7. **Event Logging**: Records all operations and state transitions for audit and debugging
+> **Known issue**: In fulfillment workflows, `processOrder()` runs twice (on
+> validate and on fulfill). The linked membership+contribution path has an
+> internal duplicate guard, but standalone contributions may be created twice.
+> See [todo #37](../development/todo.md).
 
-## Detailed Processing
+## Processing Flow
 
-### 1. Contact Management
-- Extracts customer data from the order's billing profile
-- Searches for existing CiviCRM contact by email address
-- Creates new contact if none exists
-- Updates existing contact with current information
+### Step 1 — Pre-Flight Checks
 
-### 2. Product Processing
-For each order item with CiviCRM integration enabled:
+`OrderCivicrmUpdater::processOrder()` runs three guards:
 
-#### Contributions
-- Creates a CiviCRM contribution record
-- Uses the configured Financial Type
-- Records the order amount and currency
-- Links to the customer's contact
+1. **CiviCRM availability** — `CivicrmHelper::isAvailable()`. If CiviCRM is down
+   or in maintenance mode, processing is skipped and the order completes normally.
+2. **Customer exists** — `$order->getCustomer()`. Anonymous orders are skipped.
+3. **Contact resolution** — `ContactUpdater::getContactIdByUser()` finds or
+   creates a CiviCRM contact for the Drupal user. If this fails, processing stops.
 
-#### Memberships
-- Creates a new membership or renews existing one
-- Uses the configured Membership Type
-- Calculates start and end dates based on membership rules
-- Sets appropriate membership status
+### Step 2 — Per-Item Processing
 
-#### Event Registration
-- Registers the customer for the specified event
-- Assigns the configured participant role
-- Sets participant status to "Registered"
-- Prevents duplicate registrations
+Each order item is processed individually inside its own `try/catch` block
+(catches `\CRM_Core_Exception`). One item's failure does not block others.
 
-#### Mailing List Subscription
-- Adds the customer to the specified mailing group
-- Applies configured subscription preferences
-- Handles double opt-in if enabled
-- Sends welcome messages if configured
+For each item, `processOrderItem()`:
 
-### 3. Error Handling
-- Gracefully handles CiviCRM connectivity issues
-- Prevents duplicate record creation
-- Logs all errors with context
-- Continues processing other items if one fails
+1. Gets the product variation and parent product
+2. Reads CiviCRM settings via `getCivicrmProductSettings()` (parses the
+   `field_civicrm` JSON)
+3. Checks the `enabled` flag
+4. Dispatches to the appropriate branch:
 
-## Service Architecture
+### Step 3 — Entity Type Branching
 
-The processing uses a service-based architecture:
+| Configuration | Branch | Service Called | CiviCRM Record(s) Created |
+|---------------|--------|---------------|--------------------------|
+| Membership type + financial type | Linked | `OrderCivicrmUpdater::createLinkedMembershipContribution()` | `Membership` + `Contribution` + `LineItem` + `MembershipPayment` (via Order API) |
+| Membership type only | Membership | `MembershipUpdater::createMembershipFromOrder()` | `Membership` |
+| Financial type only | Contribution | `ContributionUpdater::createContributionFromOrderWithFinancialType()` | `Contribution` |
+| Entity = mailing + group ID | Mailing | `MailingUpdater::processMailingSubscriptionFromOrder()` | `GroupContact` |
+| Entity = event | **Not implemented** | — | Silently skipped |
 
-### OrderCivicrmUpdater
-Main orchestration service that:
-- Coordinates the entire processing workflow
-- Manages the processing sequence
-- Collects and reports results
+### Linked Membership + Contribution (Order API)
 
-### Specialized Services
-- **ContactUpdater**: Handles contact creation and updates
-- **ContributionUpdater**: Manages contribution records
-- **MembershipUpdater**: Handles membership operations
-- **EventUpdater**: Manages event registrations
-- **MailingUpdater**: Handles mailing group subscriptions
+This is the most sophisticated path. It uses `\Civi\Api4\Order::create()` to
+atomically create all records in a single CiviCRM transaction:
 
-## Processing Results
+1. Calls `ensureCommerceOrderCustomFieldExists()` to auto-provision the
+   `Commerce_Order.commerce_order_id` custom field
+2. Checks for **existing contributions** via `findExistingContributionForOrder()`
+   (queries by custom field, falls back to `source` string, backfills on match)
+3. Checks for **existing memberships** via `findExistingMembershipForRenewal()`
+   (matches contact + type + status in `[New, Current, Grace]`)
+4. Calls `Order::create()` with contribution values and a membership line item
+5. If an existing membership is found, passes `membership_id` so CiviCRM
+   processes it as a renewal
 
-The system tracks processing results:
+### Membership Only
 
-```php
-$results = [
-  'contact_id' => 123,
-  'contributions' => [456],
-  'memberships' => [789],
-  'events' => [101],
-  'mailings' => [202]
-];
-```
+`MembershipUpdater::createMembershipFromOrder()`:
 
-## Logging and Monitoring
+1. Checks for existing membership of the same type for the same contact
+2. If found in state `[New, Current, Grace]` → calls `updateMembership()` (renewal)
+3. If not found → creates new membership with status `New`
+4. Sets `join_date` and `start_date` to today; **omits `end_date`** so CiviCRM
+   calculates it from the membership type definition
+5. After creation, calls `updateMembershipStatus()` to set the right status
+   based on the Commerce order state
 
-### Log Categories
-- **Info**: Successful operations and status updates
-- **Warning**: Non-critical issues (missing profiles, etc.)
-- **Error**: Failed operations and exceptions
-- **Debug**: Detailed operation information
+### Contribution Only
 
-### Log Locations
-- Drupal logs: `/admin/reports/dblog`
-- Log channel: `commerce_civicrm`
+`ContributionUpdater::createContributionFromOrderWithFinancialType()`:
 
-### Sample Log Messages
-```
-INFO: Created CiviCRM contact 123 for order 456
-INFO: Created contribution 789 for order 456
-WARNING: Billing profile incomplete for order 456
-ERROR: Failed to create membership: Invalid membership type
-```
+1. Creates a `Contribution` with the order's total amount and currency
+2. Sets `source` to `Commerce Order #<id>`
+3. Sets `Commerce_Order.commerce_order_id` custom field for cross-referencing
+4. Maps Commerce order state to CiviCRM contribution status:
+   completed → Completed, canceled → Cancelled, pending → Pending
+
+### Mailing Subscription
+
+`MailingUpdater::processMailingSubscriptionFromOrder()`:
+
+1. Checks existing group membership via `GroupContact::get()`
+2. If double opt-in enabled → sets status to `Pending`; otherwise `Added`
+3. Handles re-subscription (previously removed contacts)
+4. Double opt-in email and welcome message are stubs (log only, not yet sending)
+
+## Contact Management
+
+`ContactUpdater::getContactIdByUser()` resolves a Drupal user to a CiviCRM
+contact:
+
+1. Looks up `UFMatch` record (Drupal user ↔ CiviCRM contact mapping)
+2. If found, updates the existing contact with current information
+3. If not found, uses CiviCRM's deduplication rules (`Contact::getDuplicates()`
+   with the `Individual.Supervised` rule)
+4. If still not found, creates a new contact
+
+Contact data is extracted from the order's billing profile, including address
+fields mapped to CiviCRM's `address_primary.*` join paths.
+
+## Cancellation Processing
+
+`OrderCivicrmUpdater::processCancellation()` runs when an order transitions to
+`canceled`:
+
+| Entity Type | Cancellation Action | Per-Item? |
+|-------------|-------------------|-----------|
+| Membership | `MembershipUpdater::cancelMembershipFromOrder()` — sets status to Cancelled | Yes |
+| Contribution | `ContributionUpdater::cancelContributionFromOrder()` — sets status to Cancelled | Once per order |
+| Mailing | **Not handled** — contact remains subscribed | — |
+| Event | **Not handled** | — |
+
+Each cancellation is wrapped in its own `try/catch` — one failure does not
+block others.
+
+> **Known gap**: Mailing subscriptions are not reversed on cancellation. The
+> `MailingUpdater::removeContactFromMailingGroup()` method exists but is never
+> called from `processCancellation()`.
 
 ## Duplicate Prevention
 
-The system prevents duplicate records through:
+| Record Type | Guard | Method |
+|-------------|-------|--------|
+| Linked contribution | Custom field `Commerce_Order.commerce_order_id` + `source` fallback | `findExistingContributionForOrder()` |
+| Membership | Same contact + same type + status in `[New, Current, Grace]` | `findExistingMembership()` / `findExistingMembershipForRenewal()` |
+| Mailing subscription | `GroupContact::get()` check | `checkGroupMembership()` |
+| Standalone contribution | **No duplicate guard** | — |
 
-### Contact Matching
-- Matches contacts by email address
-- Updates existing contacts instead of creating duplicates
+## Error Handling
 
-### Contribution Checking
-- Checks for existing contributions from the same order
-- Prevents multiple contributions for the same order item
+- **Per-item isolation**: Each order item is processed in its own `try/catch`
+  (`\CRM_Core_Exception`). One item's failure does not block others.
+- **CiviCRM unavailable**: Processing is skipped entirely; the order completes
+  normally in Commerce. No retry mechanism exists.
+- **Customer visibility**: Errors are **never** shown to the customer. All
+  failures are logged to the `commerce_civicrm` log channel only.
+- **Admin visibility**: Check `/admin/reports/dblog` filtered by
+  `commerce_civicrm`. The status page at `/admin/reports/status` reports
+  CiviCRM availability.
 
-### Event Registration
-- Verifies existing participant records
-- Prevents duplicate event registrations
+## Logging
 
-### Mailing Group Membership
-- Checks existing group memberships
-- Updates preferences for existing members
+### Log Channel
 
-## Performance Considerations
+All messages use the `commerce_civicrm` logger channel.
 
-### Efficient Processing
-- Batches CiviCRM API calls where possible
-- Uses caching for frequently accessed data
-- Processes items in optimal order
+### Log Levels
 
-### Error Recovery
-- Failed items don't block processing of other items
-- Comprehensive error logging for troubleshooting
-- Graceful degradation when CiviCRM is unavailable
+| Level | Examples |
+|-------|---------|
+| **info** | Successful record creation, processing start/end |
+| **warning** | Missing customer, missing billing profile, failed record creation |
+| **error** | CiviCRM unavailable, API exceptions, processing failures |
+| **debug** | Product settings, per-item processing details |
 
-## Monitoring Order Processing
+### Sample Messages
 
-### Check Processing Status
-1. Review order completion logs
-2. Verify CiviCRM records were created
-3. Check for any error messages
-4. Validate customer data accuracy
+```
+INFO: Processing order 456 placement (draft → completed) in workflow order_default
+INFO: Created membership 789 for order item 1 (order 456)
+WARNING: Order 456 has no customer - skipping CiviCRM integration
+ERROR: CiviCRM is not available - skipping order 456 processing
+```
 
-### Common Processing Issues
-- Incomplete billing profiles
-- Invalid CiviCRM entity IDs
-- CiviCRM connectivity problems
-- Duplicate prevention conflicts
+## Service Architecture
+
+| Service | Role |
+|---------|------|
+| `commerce_civicrm.order_complete_subscriber` | Event subscriber — catches Commerce transitions |
+| `commerce_civicrm.order_civicrm_updater` | Orchestrator — dispatches to entity-specific services |
+| `commerce_civicrm.contact_updater` | Contact resolution and creation |
+| `commerce_civicrm.contribution_updater` | Contribution CRUD |
+| `commerce_civicrm.membership_updater` | Membership CRUD |
+| `commerce_civicrm.mailing_updater` | Mailing group subscriptions |
+| `commerce_civicrm.civicrm_helper` | CiviCRM bootstrap, availability, maintenance mode |
+| `commerce_civicrm.product_form_helper` | Product form UI for CiviCRM settings |
 
 ## Next Steps
 
-- [Troubleshooting](troubleshooting.md) - Resolve common processing issues
-- [Extensions Overview](../extensions/overview.md) - Learn about advanced features
-- [Service Architecture](../services/overview.md) - Understand the technical implementation
+- [Troubleshooting](troubleshooting.md) — resolve common processing issues
+- [Services Overview](../services/overview.md) — technical service documentation

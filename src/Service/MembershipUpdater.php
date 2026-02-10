@@ -4,51 +4,41 @@ namespace Drupal\commerce_civicrm\Service;
 
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
+use Drupal\Core\Logger\LoggerChannelInterface;
+use Drupal\Core\StringTranslation\StringTranslationTrait;
 use Drupal\commerce_order\Entity\OrderInterface;
-use Drupal\commerce_product\Entity\ProductInterface;
 use Drupal\commerce_order\Entity\OrderItemInterface;
 use Drupal\commerce_civicrm\Service\CivicrmHelper;
+use Civi\Api4\Membership;
+use Civi\Api4\MembershipType;
+use Civi\Api4\MembershipStatus;
 
 /**
  * Service for updating CiviCRM memberships based on Commerce Order data.
  */
 class MembershipUpdater {
 
-  /**
-   * The entity type manager.
-   *
-   * @var \Drupal\Core\Entity\EntityTypeManagerInterface
-   */
-  protected $entityTypeManager;
+  use StringTranslationTrait;
 
   /**
    * The logger factory.
    *
    * @var \Drupal\Core\Logger\LoggerChannelInterface
    */
-  protected $logger;
-
-  /**
-   * The CiviCRM helper service.
-   *
-   * @var \Drupal\commerce_civicrm\Service\CivicrmHelper
-   */
-  protected $civicrmHelper;
+  protected LoggerChannelInterface $logger;
 
   /**
    * Constructs a MembershipUpdater object.
    *
-   * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entity_type_manager
-   *   The entity type manager.
    * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $logger_factory
    *   The logger factory.
-   * @param \Drupal\commerce_civicrm\Service\CivicrmHelper $civicrm_helper
-   *   The CiviCRM helper service.
    */
-  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory, CivicrmHelper $civicrm_helper) {
-    $this->entityTypeManager = $entity_type_manager;
+  public function __construct(
+    protected readonly EntityTypeManagerInterface $entityTypeManager,
+    LoggerChannelFactoryInterface $logger_factory,
+    protected readonly CivicrmHelper $civicrmHelper,
+  ) {
     $this->logger = $logger_factory->get('commerce_civicrm');
-    $this->civicrmHelper = $civicrm_helper;
   }
 
   /**
@@ -66,7 +56,7 @@ class MembershipUpdater {
    * @return int|null
    *   The membership ID if successful, NULL otherwise.
    */
-  public function createMembershipFromOrder($contact_id, $membership_type_id, OrderInterface $order, OrderItemInterface $order_item) {
+  public function createMembershipFromOrder($contact_id, $membership_type_id, OrderInterface $order, OrderItemInterface $order_item): ?int {
     if (!$this->civicrmHelper->initialize()) {
       $this->logger->error('Failed to initialize CiviCRM for membership creation');
       return NULL;
@@ -94,7 +84,7 @@ class MembershipUpdater {
         return NULL;
       }
 
-      // Calculate membership dates
+      // Calculate membership dates.
       $dates = $this->calculateMembershipDates($membership_type);
       
       // Prepare membership data
@@ -103,7 +93,6 @@ class MembershipUpdater {
         'membership_type_id' => $membership_type_id,
         'join_date' => $dates['join_date'],
         'start_date' => $dates['start_date'],
-        'end_date' => $dates['end_date'],
         'source' => 'Commerce Order #' . $order->id(),
         'status_id' => $this->getMembershipStatusId('New'), // Will be updated based on payment status
       ];
@@ -112,10 +101,9 @@ class MembershipUpdater {
       $membership_data = $this->addCustomFieldsToMembership($membership_data, $order, $order_item);
 
       // Create the membership
-      $result = civicrm_api4('Membership', 'create', [
-        'values' => $membership_data,
-        'checkPermissions' => FALSE,
-      ]);
+      $result = Membership::create(FALSE)
+        ->setValues($membership_data)
+        ->execute();
 
       if (!empty($result[0]['id'])) {
         $membership_id = $result[0]['id'];
@@ -133,7 +121,7 @@ class MembershipUpdater {
       $this->logger->error('Failed to create CiviCRM membership: empty result');
       return NULL;
 
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error creating CiviCRM membership: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -152,21 +140,18 @@ class MembershipUpdater {
    * @return array|null
    *   The membership data if found, NULL otherwise.
    */
-  protected function findExistingMembership($contact_id, $membership_type_id) {
+  protected function findExistingMembership($contact_id, $membership_type_id): ?array {
     try {
-      $result = civicrm_api4('Membership', 'get', [
-        'select' => ['id', 'status_id', 'end_date'],
-        'where' => [
-          ['contact_id', '=', $contact_id],
-          ['membership_type_id', '=', $membership_type_id],
-          ['status_id:name', 'IN', ['New', 'Current', 'Grace']],
-        ],
-        'limit' => 1,
-        'checkPermissions' => FALSE,
-      ]);
+      $result = Membership::get(FALSE)
+        ->addSelect('id', 'status_id', 'end_date')
+        ->addWhere('contact_id', '=', $contact_id)
+        ->addWhere('membership_type_id', '=', $membership_type_id)
+        ->addWhere('status_id:name', 'IN', ['New', 'Current', 'Grace'])
+        ->setLimit(1)
+        ->execute();
 
       return !empty($result[0]) ? $result[0] : NULL;
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error finding existing membership: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -187,7 +172,7 @@ class MembershipUpdater {
    * @return int|null
    *   The membership ID if successful, NULL otherwise.
    */
-  protected function updateMembership($membership_id, OrderInterface $order, OrderItemInterface $order_item) {
+  protected function updateMembership($membership_id, OrderInterface $order, OrderItemInterface $order_item): ?int {
     try {
       $update_data = [
         'source' => 'Commerce Order #' . $order->id() . ' (Renewal)',
@@ -196,11 +181,10 @@ class MembershipUpdater {
       // Add custom fields if configured
       $update_data = $this->addCustomFieldsToMembership($update_data, $order, $order_item);
 
-      $result = civicrm_api4('Membership', 'update', [
-        'where' => [['id', '=', $membership_id]],
-        'values' => $update_data,
-        'checkPermissions' => FALSE,
-      ]);
+      $result = Membership::update(FALSE)
+        ->addWhere('id', '=', $membership_id)
+        ->setValues($update_data)
+        ->execute();
 
       if (!empty($result[0]['id'])) {
         $this->logger->info('Updated CiviCRM membership @membership_id', [
@@ -210,7 +194,7 @@ class MembershipUpdater {
       }
 
       return NULL;
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error updating CiviCRM membership: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -227,17 +211,16 @@ class MembershipUpdater {
    * @return array|null
    *   The membership type data if found, NULL otherwise.
    */
-  protected function getMembershipTypeDetails($membership_type_id) {
+  protected function getMembershipTypeDetails($membership_type_id): ?array {
     try {
-      $result = civicrm_api4('MembershipType', 'get', [
-        'select' => ['id', 'name', 'duration_unit', 'duration_interval', 'period_type'],
-        'where' => [['id', '=', $membership_type_id]],
-        'limit' => 1,
-        'checkPermissions' => FALSE,
-      ]);
+      $result = MembershipType::get(FALSE)
+        ->addSelect('id', 'name', 'duration_unit', 'duration_interval', 'period_type')
+        ->addWhere('id', '=', $membership_type_id)
+        ->setLimit(1)
+        ->execute();
 
       return !empty($result[0]) ? $result[0] : NULL;
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error getting membership type details: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -252,40 +235,15 @@ class MembershipUpdater {
    *   The membership type data.
    *
    * @return array
-   *   Array with join_date, start_date, and end_date.
+   *   Array with join_date and start_date. The end_date is intentionally
+   *   omitted so CiviCRM can calculate it based on the membership type.
    */
-  protected function calculateMembershipDates($membership_type) {
-    $today = new \DateTime();
-    $join_date = $today->format('Y-m-d');
-    $start_date = $today->format('Y-m-d');
-    
-    // Calculate end date based on membership type duration
-    $end_date = clone $today;
-    $duration_unit = $membership_type['duration_unit'] ?? 'year';
-    $duration_interval = $membership_type['duration_interval'] ?? 1;
-    
-    switch ($duration_unit) {
-      case 'day':
-        $end_date->add(new \DateInterval('P' . $duration_interval . 'D'));
-        break;
-      case 'month':
-        $end_date->add(new \DateInterval('P' . $duration_interval . 'M'));
-        break;
-      case 'year':
-      default:
-        $end_date->add(new \DateInterval('P' . $duration_interval . 'Y'));
-        break;
-    }
-    
-    // Handle fixed period memberships (e.g., calendar year)
-    if ($membership_type['period_type'] === 'fixed') {
-      $end_date = new \DateTime($today->format('Y') . '-12-31');
-    }
-    
+  protected function calculateMembershipDates($membership_type): array {
+    $today = new \DateTimeImmutable();
+
     return [
-      'join_date' => $join_date,
-      'start_date' => $start_date,
-      'end_date' => $end_date->format('Y-m-d'),
+      'join_date' => $today->format('Y-m-d'),
+      'start_date' => $today->format('Y-m-d'),
     ];
   }
 
@@ -302,7 +260,7 @@ class MembershipUpdater {
    * @return array
    *   The updated membership data.
    */
-  protected function addCustomFieldsToMembership($membership_data, OrderInterface $order, OrderItemInterface $order_item) {
+  protected function addCustomFieldsToMembership($membership_data, OrderInterface $order, OrderItemInterface $order_item): array {
     // Add order reference
     $membership_data['source'] = 'Commerce Order #' . $order->id();
     
@@ -319,8 +277,10 @@ class MembershipUpdater {
    *   The membership ID.
    * @param \Drupal\commerce_order\Entity\OrderInterface $order
    *   The Commerce Order entity.
+   *
+   * @return void
    */
-  protected function updateMembershipStatus($membership_id, OrderInterface $order) {
+  protected function updateMembershipStatus($membership_id, OrderInterface $order): void {
     try {
       $status_name = 'New';
       
@@ -339,17 +299,16 @@ class MembershipUpdater {
           break;
       }
 
-      civicrm_api4('Membership', 'update', [
-        'where' => [['id', '=', $membership_id]],
-        'values' => ['status_id' => $this->getMembershipStatusId($status_name)],
-        'checkPermissions' => FALSE,
-      ]);
+      Membership::update(FALSE)
+        ->addWhere('id', '=', $membership_id)
+        ->setValues(['status_id' => $this->getMembershipStatusId($status_name)])
+        ->execute();
 
       $this->logger->info('Updated membership @membership_id status to @status', [
         '@membership_id' => $membership_id,
         '@status' => $status_name,
       ]);
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error updating membership status: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -369,7 +328,7 @@ class MembershipUpdater {
    * @return int|null
    *   The membership ID if successful, NULL otherwise.
    */
-  public function renewMembership($contact_id, $membership_type_id, OrderInterface $order) {
+  public function renewMembership($contact_id, $membership_type_id, OrderInterface $order): ?int {
     if (!$this->civicrmHelper->initialize()) {
       $this->logger->error('Failed to initialize CiviCRM for membership renewal');
       return NULL;
@@ -382,51 +341,30 @@ class MembershipUpdater {
         return NULL;
       }
 
-      // Get membership type details for calculating new end date
+      // Get membership type details for renewal context.
       $membership_type = $this->getMembershipTypeDetails($membership_type_id);
       if (!$membership_type) {
         return NULL;
       }
 
-      // Calculate new end date from current end date
-      $current_end_date = new \DateTime($existing_membership['end_date']);
-      $new_end_date = clone $current_end_date;
-      
-      $duration_unit = $membership_type['duration_unit'] ?? 'year';
-      $duration_interval = $membership_type['duration_interval'] ?? 1;
-      
-      switch ($duration_unit) {
-        case 'day':
-          $new_end_date->add(new \DateInterval('P' . $duration_interval . 'D'));
-          break;
-        case 'month':
-          $new_end_date->add(new \DateInterval('P' . $duration_interval . 'M'));
-          break;
-        case 'year':
-        default:
-          $new_end_date->add(new \DateInterval('P' . $duration_interval . 'Y'));
-          break;
-      }
+      // Update membership without setting end_date so CiviCRM can calculate it.
+      $result = Membership::update(FALSE)
+        ->addWhere('id', '=', $existing_membership['id'])
+        ->setValues([
+          'status_id' => $this->getMembershipStatusId('Current'),
+          'source' => 'Commerce Order #' . $order->id() . ' (Renewal)',
+        ])
+        ->execute();
 
-      // Update membership
-        $result = civicrm_api4('Membership', 'update', [
-          'where' => [['id', '=', $membership_id]],
-          'values' => [
-            'end_date' => $new_end_date->format('Y-m-d'),
-            'status_id' => $this->getMembershipStatusId('Current'),
-            'source' => 'Commerce Order #' . $order->id() . ' (Renewal)',
-          ],
-          'checkPermissions' => FALSE,
-        ]);      if (!empty($result[0]['id'])) {
-        $this->logger->info('Renewed CiviCRM membership @membership_id until @end_date', [
+      if (!empty($result[0]['id'])) {
+        $this->logger->info('Renewed CiviCRM membership @membership_id', [
           '@membership_id' => $existing_membership['id'],
-          '@end_date' => $new_end_date->format('Y-m-d'),
         ]);
         return $existing_membership['id'];
       }
 
       return NULL;
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error renewing CiviCRM membership: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -440,31 +378,30 @@ class MembershipUpdater {
    * @return array
    *   Array of membership types keyed by ID.
    */
-  public function getMembershipTypes() {
+  public function getMembershipTypes(): array {
     if (!$this->civicrmHelper->initialize()) {
       $this->logger->error('Failed to initialize CiviCRM for getting membership types');
       return [];
     }
 
     try {
-      $result = civicrm_api4('MembershipType', 'get', [
-        'select' => ['id', 'name', 'description'],
-        'where' => [['is_active', '=', TRUE]],
-        'orderBy' => ['name' => 'ASC'],
-        'checkPermissions' => FALSE,
-      ]);
+      $result = MembershipType::get(FALSE)
+        ->addSelect('id', 'name', 'label', 'description')
+        ->addWhere('is_active', '=', TRUE)
+        ->addOrderBy('label', 'ASC')
+        ->execute();
 
-      $membership_types = ['' => t('- Select a membership type -')];
+      $membership_types = ['' => $this->t('- Select a membership type -')];
       foreach ($result as $membership_type) {
-        $membership_types[$membership_type['id']] = $membership_type['name'];
+        $membership_types[$membership_type['id']] = $membership_type['label'];
       }
 
       return $membership_types;
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error getting membership types: @error', [
         '@error' => $e->getMessage(),
       ]);
-      return ['' => t('Error loading membership types')];
+      return ['' => $this->t('Error loading membership types')];
     }
   }
 
@@ -481,7 +418,7 @@ class MembershipUpdater {
    * @return bool
    *   TRUE if successful, FALSE otherwise.
    */
-  public function cancelMembership($contact_id, $membership_type_id, OrderInterface $order) {
+  public function cancelMembership($contact_id, $membership_type_id, OrderInterface $order): bool {
     if (!$this->civicrmHelper->initialize()) {
       $this->logger->error('Failed to initialize CiviCRM for membership cancellation');
       return FALSE;
@@ -494,14 +431,13 @@ class MembershipUpdater {
         return FALSE;
       }
 
-      $result = civicrm_api4('Membership', 'update', [
-        'where' => [['id', '=', $existing_membership['id']]],
-        'values' => [
+      $result = Membership::update(FALSE)
+        ->addWhere('id', '=', $existing_membership['id'])
+        ->setValues([
           'status_id' => $this->getMembershipStatusId('Cancelled'),
           'source' => 'Commerce Order #' . $order->id() . ' (Cancelled)',
-        ],
-        'checkPermissions' => FALSE,
-      ]);
+        ])
+        ->execute();
 
       if (!empty($result[0]['id'])) {
         $this->logger->info('Cancelled CiviCRM membership @membership_id', [
@@ -511,7 +447,7 @@ class MembershipUpdater {
       }
 
       return FALSE;
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error cancelling CiviCRM membership: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -525,19 +461,18 @@ class MembershipUpdater {
    * @return array
    *   Array of membership status options keyed by ID.
    */
-  public function getMembershipStatuses() {
+  public function getMembershipStatuses(): array {
     if (!$this->civicrmHelper->initialize()) {
       $this->logger->error('Failed to initialize CiviCRM for getting membership statuses');
       return [];
     }
 
     try {
-      $result = civicrm_api4('MembershipStatus', 'get', [
-        'select' => ['id', 'name', 'label'],
-        'where' => [['is_active', '=', TRUE]],
-        'orderBy' => ['weight' => 'ASC'],
-        'checkPermissions' => FALSE,
-      ]);
+      $result = MembershipStatus::get(FALSE)
+        ->addSelect('id', 'name', 'label')
+        ->addWhere('is_active', '=', TRUE)
+        ->addOrderBy('weight', 'ASC')
+        ->execute();
 
       $statuses = [];
       foreach ($result as $status) {
@@ -545,7 +480,7 @@ class MembershipUpdater {
       }
 
       return $statuses;
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error getting membership statuses: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -568,7 +503,7 @@ class MembershipUpdater {
    * @return int|null
    *   The membership ID if successful, NULL otherwise.
    */
-  public function createPendingMembershipFromOrder($contact_id, $membership_type_id, OrderInterface $order, OrderItemInterface $order_item) {
+  public function createPendingMembershipFromOrder($contact_id, $membership_type_id, OrderInterface $order, OrderItemInterface $order_item): ?int {
     if (!$this->civicrmHelper->initialize()) {
       $this->logger->error('Failed to initialize CiviCRM for pending membership creation');
       return NULL;
@@ -596,7 +531,7 @@ class MembershipUpdater {
         return NULL;
       }
 
-      // Calculate membership dates
+      // Calculate membership dates.
       $dates = $this->calculateMembershipDates($membership_type);
       
       // Get proper status ID for pending memberships
@@ -617,7 +552,6 @@ class MembershipUpdater {
         'membership_type_id' => $membership_type_id,
         'join_date' => $dates['join_date'],
         'start_date' => $dates['start_date'],
-        'end_date' => $dates['end_date'],
         'source' => 'Commerce Order #' . $order->id() . ' (Pending)',
         'status_id' => $pending_status_id,
       ];
@@ -630,10 +564,9 @@ class MembershipUpdater {
       ]);
 
       // Create the membership
-      $result = civicrm_api4('Membership', 'create', [
-        'values' => $membership_data,
-        'checkPermissions' => FALSE,
-      ]);
+      $result = Membership::create(FALSE)
+        ->setValues($membership_data)
+        ->execute();
 
       if (!empty($result[0]['id'])) {
         $membership_id = $result[0]['id'];
@@ -647,7 +580,7 @@ class MembershipUpdater {
       $this->logger->error('Failed to create pending CiviCRM membership: empty result');
       return NULL;
 
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error creating pending CiviCRM membership: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -668,7 +601,7 @@ class MembershipUpdater {
    * @return int|null
    *   The membership ID if successful, NULL otherwise.
    */
-  protected function updateMembershipToPending($membership_id, OrderInterface $order, OrderItemInterface $order_item) {
+  protected function updateMembershipToPending($membership_id, OrderInterface $order, OrderItemInterface $order_item): ?int {
     try {
       // Get proper status ID for pending memberships
       $pending_status_id = $this->getMembershipStatusId('Pending');
@@ -690,11 +623,10 @@ class MembershipUpdater {
       // Add custom fields if configured
       $update_data = $this->addCustomFieldsToMembership($update_data, $order, $order_item);
 
-      $result = civicrm_api4('Membership', 'update', [
-        'where' => [['id', '=', $membership_id]],
-        'values' => $update_data,
-        'checkPermissions' => FALSE,
-      ]);
+      $result = Membership::update(FALSE)
+        ->addWhere('id', '=', $membership_id)
+        ->setValues($update_data)
+        ->execute();
 
       if (!empty($result[0]['id'])) {
         $this->logger->info('Updated CiviCRM membership @membership_id to pending status', [
@@ -704,7 +636,7 @@ class MembershipUpdater {
       }
 
       return NULL;
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error updating CiviCRM membership to pending: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -727,7 +659,7 @@ class MembershipUpdater {
    * @return int|null
    *   The cancelled membership ID if successful, NULL otherwise.
    */
-  public function cancelMembershipFromOrder($contact_id, $membership_type_id, OrderInterface $order, OrderItemInterface $order_item) {
+  public function cancelMembershipFromOrder($contact_id, $membership_type_id, OrderInterface $order, OrderItemInterface $order_item): ?int {
     if (!$this->civicrmHelper->initialize()) {
       $this->logger->error('Failed to initialize CiviCRM for membership cancellation');
       return NULL;
@@ -748,14 +680,13 @@ class MembershipUpdater {
         return NULL;
       }
 
-      $result = civicrm_api4('Membership', 'update', [
-        'where' => [['id', '=', $existing_membership['id']]],
-        'values' => [
+      $result = Membership::update(FALSE)
+        ->addWhere('id', '=', $existing_membership['id'])
+        ->setValues([
           'status_id' => $this->getMembershipStatusId('Cancelled'),
           'source' => 'Commerce Order #' . $order->id() . ' (Cancelled)',
-        ],
-        'checkPermissions' => FALSE,
-      ]);
+        ])
+        ->execute();
 
       if (!empty($result[0]['id'])) {
         $this->logger->info('Cancelled CiviCRM membership @membership_id for contact @contact_id', [
@@ -766,7 +697,7 @@ class MembershipUpdater {
       }
 
       return NULL;
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error cancelling CiviCRM membership: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -783,22 +714,19 @@ class MembershipUpdater {
    * @return int|null
    *   The status ID if found, NULL otherwise.
    */
-  protected function getMembershipStatusId($status_name) {
+  protected function getMembershipStatusId($status_name): ?int {
     try {
-      $result = civicrm_api4('MembershipStatus', 'get', [
-        'select' => ['id'],
-        'where' => [
-          ['name', '=', $status_name],
-          ['is_active', '=', TRUE],
-        ],
-        'limit' => 1,
-        'checkPermissions' => FALSE,
-      ]);
+      $result = MembershipStatus::get(FALSE)
+        ->addSelect('id')
+        ->addWhere('name', '=', $status_name)
+        ->addWhere('is_active', '=', TRUE)
+        ->setLimit(1)
+        ->execute();
 
       if (!empty($result[0]['id'])) {
         return $result[0]['id'];
       }
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error getting membership status ID for @status: @error', [
         '@status' => $status_name,
         '@error' => $e->getMessage(),

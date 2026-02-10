@@ -1,493 +1,216 @@
-# API Reference
+# CiviCRM API4 Usage Patterns
 
-## Overview
+All CiviCRM operations in this module use **API4** with the **OOP calling convention** (`\Civi\Api4\Entity::action(FALSE)`).
 
-This document provides a comprehensive reference for the CiviCRM API usage patterns within the Commerce CiviCRM module. The module uses CiviCRM API4 for all operations.
+| Service | API Calls | Style |
+|---|---|---|
+| `CivicrmHelper` | 2 | OOP `\Civi\Api4\*` |
+| `ContactUpdater` | 13 | OOP `\Civi\Api4\*` |
+| `ContributionUpdater` | 13 | OOP `\Civi\Api4\*` |
+| `MembershipUpdater` | 13 | OOP `\Civi\Api4\*` |
+| `MailingUpdater` | 4 | OOP `\Civi\Api4\*` |
+| `OrderCivicrmUpdater` | 9 | OOP `\Civi\Api4\*` |
 
-## API4 Patterns
+No procedural `civicrm_api4()` calls remain. No legacy `CRM_*` class usage in source code.
 
-### Basic Operations
+All calls pass `checkPermissions = FALSE` (the first argument to every action), meaning they run with full access regardless of the logged-in user's CiviCRM permissions.
 
-#### Create Entity
+---
+
+## Bootstrap sequence
+
+Before any API call, a service must:
+
 ```php
-$result = \Civi\Api4\EntityName::create()
-  ->addValue('field_name', $value)
-  ->addValue('another_field', $another_value)
-  ->execute();
-
-$entity_id = $result->first()['id'];
-```
-
-#### Update Entity
-```php
-$result = \Civi\Api4\EntityName::update()
-  ->addWhere('id', '=', $entity_id)
-  ->addValue('field_name', $new_value)
-  ->execute();
-```
-
-#### Get Entities
-```php
-$entities = \Civi\Api4\EntityName::get()
-  ->addSelect('id', 'field1', 'field2')
-  ->addWhere('status', '=', 'active')
-  ->addOrderBy('created_date', 'DESC')
-  ->setLimit(25)
-  ->execute();
-
-foreach ($entities as $entity) {
-  // Process each entity
+if (!$this->civicrmHelper->initialize()) {
+  return NULL;
 }
 ```
 
-#### Delete Entity
+`initialize()` does:
+1. Checks `$this->moduleHandler->moduleExists('civicrm')` (injected `ModuleHandlerInterface`).
+2. Checks `$this->civicrm` service is available (injected as `@?civicrm`).
+3. Calls `$this->civicrm->initialize()` (CiviCRM bootstrap).
+4. Checks `isInMaintenanceMode()` — returns FALSE during CiviCRM upgrades or maintenance.
+
+---
+
+## Entities used
+
+### Contact
+
 ```php
-$result = \Civi\Api4\EntityName::delete()
-  ->addWhere('id', '=', $entity_id)
+// Find by UFMatch (Drupal user → CiviCRM contact)
+\Civi\Api4\UFMatch::get(FALSE)
+  ->addWhere('uf_id', '=', $drupal_uid)
+  ->execute();
+
+// Create
+\Civi\Api4\Contact::create(FALSE)
+  ->setValues([
+    'contact_type' => 'Individual',
+    'first_name'   => $first,
+    'last_name'    => $last,
+    ...
+  ])
+  ->execute();
+
+// Update
+\Civi\Api4\Contact::update(FALSE)
+  ->setValues(['id' => $id, ...])
   ->execute();
 ```
 
-## Entity-Specific Operations
+### Email
 
-### Contact Operations
-
-#### Create Contact
 ```php
-$contact = \Civi\Api4\Contact::create()
-  ->addValue('contact_type', 'Individual')
-  ->addValue('first_name', $first_name)
-  ->addValue('last_name', $last_name)
-  ->addValue('source', 'Commerce Order #' . $order_number)
-  ->execute();
-
-$contact_id = $contact->first()['id'];
-```
-
-#### Find Contact by Email
-```php
-$contacts = \Civi\Api4\Contact::get()
-  ->addSelect('id', 'first_name', 'last_name')
-  ->addJoin('Email AS email', 'INNER')
-  ->addWhere('email.email', '=', $email_address)
-  ->addWhere('email.is_primary', '=', TRUE)
-  ->addWhere('is_deleted', '=', FALSE)
-  ->execute();
-
-if ($contacts->count() > 0) {
-  $contact_id = $contacts->first()['id'];
-}
-```
-
-#### Update Contact
-```php
-$result = \Civi\Api4\Contact::update()
-  ->addWhere('id', '=', $contact_id)
-  ->addValue('first_name', $first_name)
-  ->addValue('last_name', $last_name)
-  ->addValue('modified_date', date('Y-m-d H:i:s'))
-  ->execute();
-```
-
-### Email Operations
-
-#### Create Primary Email
-```php
-$email = \Civi\Api4\Email::create()
-  ->addValue('contact_id', $contact_id)
-  ->addValue('email', $email_address)
-  ->addValue('is_primary', 1)
-  ->addValue('location_type_id', 1) // Home
-  ->execute();
-```
-
-#### Check Existing Email
-```php
-$existing_emails = \Civi\Api4\Email::get()
+// Find primary email for contact
+\Civi\Api4\Email::get(FALSE)
   ->addWhere('contact_id', '=', $contact_id)
-  ->addWhere('email', '=', $email_address)
+  ->addWhere('is_primary', '=', TRUE)
   ->execute();
 
-if ($existing_emails->count() == 0) {
-  // Create new email
-}
-```
-
-### Contribution Operations
-
-#### Create Contribution
-```php
-$contribution = \Civi\Api4\Contribution::create()
+// Create
+\Civi\Api4\Email::create(FALSE)
   ->addValue('contact_id', $contact_id)
-  ->addValue('financial_type_id', $financial_type_id)
-  ->addValue('total_amount', $amount)
-  ->addValue('currency', $currency)
-  ->addValue('contribution_status_id', 1) // Completed
-  ->addValue('receive_date', date('Y-m-d H:i:s'))
-  ->addValue('source', 'Commerce Order #' . $order_number)
+  ->addValue('email', $email)
+  ->addValue('is_primary', TRUE)
   ->execute();
-
-$contribution_id = $contribution->first()['id'];
 ```
 
-#### Check for Existing Contribution
+### Contribution
+
 ```php
-$existing = \Civi\Api4\Contribution::get()
-  ->addWhere('contact_id', '=', $contact_id)
-  ->addWhere('source', '=', $source)
-  ->addWhere('total_amount', '=', $amount)
+// Find by custom field (primary lookup)
+\Civi\Api4\Contribution::get(FALSE)
+  ->addWhere('Commerce_Order.commerce_order_id', '=', $order->id())
   ->execute();
 
-if ($existing->count() > 0) {
-  return $existing->first()['id'];
-}
+// Fallback: find by source (exact match, for legacy contributions)
+\Civi\Api4\Contribution::get(FALSE)
+  ->addWhere('source', '=', 'Commerce Order #' . $order->id())
+  ->execute();
+
+// Create
+\Civi\Api4\Contribution::create(FALSE)
+  ->setValues([
+    'contact_id'                       => $contact_id,
+    'financial_type_id'                => $financial_type_id,
+    'total_amount'                     => $amount,
+    'currency'                         => $currency,
+    'contribution_status_id'           => $status_id,
+    'receive_date'                     => DrupalDateTime::createFromTimestamp($timestamp)->format('Y-m-d H:i:s'),
+    'source'                           => 'Commerce Order #' . $order->id(),
+    'Commerce_Order.commerce_order_id' => $order->id(),
+  ])
+  ->execute();
+
+// Cancel
+\Civi\Api4\Contribution::update(FALSE)
+  ->addWhere('id', '=', $contribution_id)
+  ->addValue('contribution_status_id', $cancelled_status_id)
+  ->execute();
 ```
 
-#### Get Financial Types
+### FinancialType
+
 ```php
-$financial_types = \Civi\Api4\FinancialType::get()
-  ->addSelect('id', 'name')
+\Civi\Api4\FinancialType::get(FALSE)
+  ->addSelect('id', 'name', 'label')
   ->addWhere('is_active', '=', TRUE)
-  ->addOrderBy('name', 'ASC')
+  ->addOrderBy('label', 'ASC')
   ->execute();
-
-$options = [];
-foreach ($financial_types as $type) {
-  $options[$type['id']] = $type['name'];
-}
 ```
 
-### Membership Operations
+### OptionValue (status lookups)
 
-#### Create Membership
 ```php
-$membership = \Civi\Api4\Membership::create()
+// Contribution status
+\Civi\Api4\OptionValue::get(FALSE)
+  ->addSelect('value')
+  ->addWhere('option_group_id:name', '=', 'contribution_status')
+  ->addWhere('name', '=', 'Completed')
+  ->execute();
+
+// Payment instrument
+\Civi\Api4\OptionValue::get(FALSE)
+  ->addSelect('value')
+  ->addWhere('option_group_id:name', '=', 'payment_instrument')
+  ->addWhere('name', '=', 'Credit Card')
+  ->execute();
+```
+
+### Membership (OOP style)
+
+```php
+use Civi\Api4\Membership;
+use Civi\Api4\MembershipType;
+use Civi\Api4\MembershipStatus;
+
+// Create — only join_date and start_date; CiviCRM calculates end_date
+Membership::create(FALSE)
   ->addValue('contact_id', $contact_id)
-  ->addValue('membership_type_id', $membership_type_id)
-  ->addValue('source', 'Commerce Order #' . $order_number)
-  ->addValue('start_date', date('Y-m-d'))
-  ->addValue('status_id', 1) // New
+  ->addValue('membership_type_id', $type_id)
+  ->addValue('join_date', $today->format('Y-m-d'))
+  ->addValue('start_date', $today->format('Y-m-d'))
+  ->addValue('source', 'Commerce Order #42')
+  ->addValue('status_id', $status_id)
   ->execute();
 
-$membership_id = $membership->first()['id'];
-```
-
-#### Get Membership Types
-```php
-$membership_types = \Civi\Api4\MembershipType::get()
-  ->addSelect('id', 'name', 'minimum_fee', 'duration_interval', 'duration_unit')
-  ->addWhere('is_active', '=', TRUE)
-  ->addOrderBy('name', 'ASC')
-  ->execute();
-
-$options = [];
-foreach ($membership_types as $type) {
-  $fee_info = '';
-  if ($type['minimum_fee']) {
-    $fee_info = ' ($' . number_format($type['minimum_fee'], 2) . ')';
-  }
-  $options[$type['id']] = $type['name'] . $fee_info;
-}
-```
-
-#### Find Existing Membership
-```php
-$existing = \Civi\Api4\Membership::get()
+// Find existing (New / Current / Grace)
+Membership::get(FALSE)
+  ->addSelect('id', 'status_id', 'end_date')
   ->addWhere('contact_id', '=', $contact_id)
-  ->addWhere('membership_type_id', '=', $membership_type_id)
-  ->addWhere('status_id', 'IN', [1, 2]) // New or Current
-  ->addOrderBy('end_date', 'DESC')
+  ->addWhere('membership_type_id', '=', $type_id)
+  ->addWhere('status_id:name', 'IN', ['New', 'Current', 'Grace'])
   ->setLimit(1)
   ->execute();
+
+// Cancel
+Membership::update(FALSE)
+  ->addWhere('id', '=', $membership_id)
+  ->addValue('status_id', $cancelled_status_id)
+  ->execute();
 ```
 
-### Event Operations
+### MembershipType / MembershipStatus
 
-#### Get Events
 ```php
-$events = \Civi\Api4\Event::get()
-  ->addSelect('id', 'title', 'start_date', 'end_date', 'max_participants')
+MembershipType::get(FALSE)
+  ->addSelect('id', 'name', 'label', 'duration_unit', 'duration_interval', 'period_type')
+  ->addWhere('id', '=', $type_id)
+  ->setLimit(1)
+  ->execute();
+
+MembershipStatus::get(FALSE)
+  ->addWhere('name', '=', 'Current')
   ->addWhere('is_active', '=', TRUE)
-  ->addWhere('is_public', '=', TRUE)
-  ->addWhere('start_date', '>=', date('Y-m-d'))
-  ->addOrderBy('start_date', 'ASC')
-  ->execute();
-
-$options = [];
-foreach ($events as $event) {
-  $date_info = '';
-  if ($event['start_date']) {
-    $date_info = ' (' . date('M j, Y', strtotime($event['start_date'])) . ')';
-  }
-  $options[$event['id']] = $event['title'] . $date_info;
-}
-```
-
-#### Create Participant
-```php
-$participant = \Civi\Api4\Participant::create()
-  ->addValue('contact_id', $contact_id)
-  ->addValue('event_id', $event_id)
-  ->addValue('role_id', $participant_role_id)
-  ->addValue('status_id', 1) // Registered
-  ->addValue('register_date', date('Y-m-d H:i:s'))
-  ->addValue('source', 'Commerce Order #' . $order_number)
-  ->execute();
-
-$participant_id = $participant->first()['id'];
-```
-
-#### Check Existing Participant
-```php
-$existing = \Civi\Api4\Participant::get()
-  ->addWhere('contact_id', '=', $contact_id)
-  ->addWhere('event_id', '=', $event_id)
-  ->addWhere('status_id', 'IN', [1, 2]) // Registered or Attended
-  ->execute();
-
-if ($existing->count() > 0) {
-  return $existing->first()['id'];
-}
-```
-
-#### Get Participant Roles
-```php
-$roles = \Civi\Api4\OptionValue::get()
-  ->addSelect('value', 'label')
-  ->addWhere('option_group_id:name', '=', 'participant_role')
-  ->addWhere('is_active', '=', TRUE)
-  ->addOrderBy('weight', 'ASC')
-  ->execute();
-
-$options = [];
-foreach ($roles as $role) {
-  $options[$role['value']] = $role['label'];
-}
-```
-
-### Group Operations
-
-#### Get Mailing Groups
-```php
-$groups = \Civi\Api4\Group::get()
-  ->addSelect('id', 'title', 'description')
-  ->addWhere('is_active', '=', TRUE)
-  ->addWhere('group_type', 'CONTAINS', 'Mailing List')
-  ->addWhere('visibility', 'IN', ['Public Pages', 'User and User Admin Only'])
-  ->addOrderBy('title', 'ASC')
-  ->execute();
-
-$options = [];
-foreach ($groups as $group) {
-  $options[$group['id']] = $group['title'];
-}
-```
-
-#### Add Contact to Group
-```php
-$group_contact = \Civi\Api4\GroupContact::create()
-  ->addValue('contact_id', $contact_id)
-  ->addValue('group_id', $group_id)
-  ->addValue('status', 'Added')
   ->execute();
 ```
 
-#### Check Group Membership
-```php
-$existing = \Civi\Api4\GroupContact::get()
-  ->addWhere('contact_id', '=', $contact_id)
-  ->addWhere('group_id', '=', $group_id)
-  ->addWhere('status', '=', 'Added')
-  ->execute();
+---
 
-return $existing->count() > 0;
-```
+## Error handling pattern
 
-## Advanced Patterns
+Every API call is wrapped in try/catch:
 
-### Batch Operations
-
-#### Create Multiple Entities
-```php
-$batch_data = [
-  ['first_name' => 'John', 'last_name' => 'Doe'],
-  ['first_name' => 'Jane', 'last_name' => 'Smith'],
-];
-
-$results = [];
-foreach (array_chunk($batch_data, 25) as $chunk) {
-  foreach ($chunk as $contact_data) {
-    $contact = \Civi\Api4\Contact::create()
-      ->addValue('contact_type', 'Individual')
-      ->addValue('first_name', $contact_data['first_name'])
-      ->addValue('last_name', $contact_data['last_name'])
-      ->execute();
-      
-    $results[] = $contact->first()['id'];
-  }
-}
-```
-
-### Complex Queries
-
-#### Join Operations
-```php
-$contacts_with_contributions = \Civi\Api4\Contact::get()
-  ->addSelect('id', 'display_name')
-  ->addSelect('SUM(contribution.total_amount) AS total_contributed')
-  ->addJoin('Contribution AS contribution', 'LEFT')
-  ->addWhere('contribution.contribution_status_id', '=', 1)
-  ->addGroupBy('id')
-  ->addHaving('total_contributed', '>', 100)
-  ->addOrderBy('total_contributed', 'DESC')
-  ->execute();
-```
-
-#### Custom Field Queries
-```php
-$contacts = \Civi\Api4\Contact::get()
-  ->addSelect('id', 'first_name', 'last_name', 'custom_field_name.value')
-  ->addWhere('custom_field_name.value', 'IS NOT NULL')
-  ->execute();
-```
-
-### Error Handling Patterns
-
-#### Standard Error Handling
 ```php
 try {
-  $result = \Civi\Api4\Contact::create()
-    ->addValue('first_name', $first_name)
-    ->addValue('last_name', $last_name)
-    ->execute();
-    
-  return $result->first()['id'];
-  
-} catch (\API_Exception $e) {
-  $this->logger->error('CiviCRM API error: @message', [
-    '@message' => $e->getMessage(),
-  ]);
-  return NULL;
-} catch (\Exception $e) {
-  $this->logger->error('General error: @message', [
-    '@message' => $e->getMessage(),
-  ]);
-  return NULL;
-}
-```
-
-#### Validation Before API Calls
-```php
-if (!$this->civicrmHelper->isCivicrmAvailable()) {
-  $this->logger->error('CiviCRM not available');
-  return NULL;
-}
-
-if (empty($contact_data['first_name']) || empty($contact_data['last_name'])) {
-  $this->logger->warning('Incomplete contact data provided');
-  return NULL;
-}
-
-// Proceed with API call
-```
-
-## Performance Optimization
-
-### Efficient Queries
-
-#### Select Only Needed Fields
-```php
-// Good: Select only needed fields
-$contacts = \Civi\Api4\Contact::get()
-  ->addSelect('id', 'first_name', 'last_name')
-  ->execute();
-
-// Avoid: Selecting all fields (default behavior)
-$contacts = \Civi\Api4\Contact::get()
-  ->execute();
-```
-
-#### Use Appropriate Limits
-```php
-$contacts = \Civi\Api4\Contact::get()
-  ->addSelect('id', 'display_name')
-  ->setLimit(25)
-  ->setOffset($offset)
-  ->execute();
-```
-
-#### Optimize WHERE Clauses
-```php
-// Good: Use indexed fields in WHERE clauses
-$contacts = \Civi\Api4\Contact::get()
-  ->addWhere('id', 'IN', $contact_ids)
-  ->execute();
-
-// Avoid: Complex LIKE queries on large datasets
-$contacts = \Civi\Api4\Contact::get()
-  ->addWhere('display_name', 'LIKE', '%' . $search_term . '%')
-  ->execute();
-```
-
-### Caching Strategies
-
-#### Cache Static Data
-```php
-protected function getCachedFinancialTypes() {
-  static $types = NULL;
-  
-  if ($types === NULL) {
-    $types = \Civi\Api4\FinancialType::get()
-      ->addSelect('id', 'name')
-      ->addWhere('is_active', '=', TRUE)
-      ->execute()
-      ->indexBy('id');
+  if (!$this->civicrmHelper->initialize()) {
+    return NULL;
   }
-  
-  return $types;
+  $result = \Civi\Api4\Entity::action(FALSE)
+    ->...
+    ->execute();
+  // process result
+} catch (\CRM_Core_Exception $e) {
+  $this->logger->error('Context message: @error', [
+    '@error' => $e->getMessage(),
+  ]);
+  return NULL; // or FALSE
 }
 ```
 
-## Best Practices
+All catch blocks use `\CRM_Core_Exception` (not generic `\Exception`). The only exception is `CivicrmHelper::initialize()` which intentionally catches `\Exception` because CiviCRM initialization can throw various exception types depending on installation state.
 
-### API Usage Guidelines
-
-1. **Always Check CiviCRM Availability**
-   ```php
-   if (!$this->civicrmHelper->isCivicrmAvailable()) {
-     return [];
-   }
-   ```
-
-2. **Use Specific Field Selection**
-   ```php
-   ->addSelect('id', 'name', 'status')  // Good
-   // Avoid selecting all fields unless necessary
-   ```
-
-3. **Implement Proper Error Handling**
-   ```php
-   try {
-     // API operation
-   } catch (\Exception $e) {
-     $this->logger->error('API error: @message', ['@message' => $e->getMessage()]);
-     return NULL;
-   }
-   ```
-
-4. **Validate Input Data**
-   ```php
-   if (empty($required_field)) {
-     $this->logger->warning('Required field missing');
-     return NULL;
-   }
-   ```
-
-5. **Use Appropriate Log Levels**
-   ```php
-   $this->logger->info('Entity created successfully');     // Success
-   $this->logger->warning('Non-critical issue occurred');  // Warning
-   $this->logger->error('Operation failed');               // Error
-   $this->logger->debug('Detailed debug information');     // Debug
-   ```
-
-This API reference provides the foundation for working with CiviCRM entities within the Commerce CiviCRM module. Always refer to the official CiviCRM API documentation for the most current information on available entities and operations.
+No CiviCRM exception is allowed to bubble up to the caller.

@@ -1,6 +1,6 @@
 {
   "name": "drupal/commerce_civicrm",
-  "description": "A Drupal module that provides seamless integration between Drupal Commerce and CiviCRM, automatically creating and updating CiviCRM records when customers complete orders.",
+  "description": "A Drupal module that provides event-driven integration between Drupal Commerce and CiviCRM, enabling flexible automation workflows triggered by Commerce order events.",
   "type": "drupal-module",
   "license": "GPL-2.0-or-later",
   "keywords": [
@@ -8,17 +8,14 @@
     "commerce",
     "civicrm",
     "crm",
-    "ecommerce",
     "integration",
     "membership",
-    "contribution",
-    "event"
+    "contribution"
   ],
   "authors": [
     {
-      "name": "Your Name",
-      "email": "your.email@example.com",
-      "homepage": "https://example.com",
+      "name": "Commerce CiviCRM Contributors",
+      "homepage": "https://www.drupal.org/project/commerce_civicrm",
       "role": "Maintainer"
     }
   ],
@@ -32,16 +29,16 @@
   "prefer-stable": true,
   "require": {
     "php": ">=8.3",
-    "drupal/core": "^10.3 || ^11.0",
-    "drupal/commerce": "^2.33",
-    "drupal/civicrm": "^6.0",
-    "drupal/profile": "^1.0",
-    "drupal/state_machine": "^1.0"
+    "drupal/core": "^11.0",
+    "drupal/commerce": "^3.0",
+    "drupal/civicrm": "^6.1",
+    "drupal/profile": "^1.2",
+    "drupal/state_machine": "^1.5"
   },
   "require-dev": {
     "drupal/coder": "^8.3",
-    "drupal/core-dev": "^10.3 || ^11.0",
-    "phpunit/phpunit": "^9.5",
+    "drupal/core-dev": "^11.0",
+    "phpunit/phpunit": "^10.5",
     "squizlabs/php_codesniffer": "^3.6"
   },
   "config": {
@@ -56,14 +53,15 @@
   "extra": {
     "drupal": {
       "version": "2.0.0-dev",
-      "datestamp": "1735680000",
+      "datestamp": "1755292800",
       "security-coverage": {
         "status": "not-covered",
         "message": "Dev releases are not covered by Drupal security advisories."
-      }
+      },
+      "tested-civicrm-versions": "6.1.0 — 6.2.0"
     },
     "branch-alias": {
-      "dev-1.x": "1.x-dev"
+      "dev-2.x": "2.x-dev"
     }
   },
   "autoload": {

@@ -2,10 +2,11 @@
 
 namespace Drupal\commerce_civicrm\Service;
 
+use Drupal\Core\Datetime\DrupalDateTime;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
+use Drupal\Core\Logger\LoggerChannelInterface;
 use Drupal\commerce_order\Entity\OrderInterface;
-use Drupal\commerce_payment\Entity\PaymentInterface;
 use Drupal\commerce_civicrm\Service\CivicrmHelper;
 
 /**
@@ -14,50 +15,24 @@ use Drupal\commerce_civicrm\Service\CivicrmHelper;
 class ContributionUpdater {
 
   /**
-   * The entity type manager.
-   *
-   * @var \Drupal\Core\Entity\EntityTypeManagerInterface
-   */
-  protected $entityTypeManager;
-
-  /**
    * The logger factory.
    *
    * @var \Drupal\Core\Logger\LoggerChannelInterface
    */
-  protected $logger;
-
-  /**
-   * The CiviCRM helper service.
-   *
-   * @var \Drupal\commerce_civicrm\Service\CivicrmHelper
-   */
-  protected $civicrmHelper;
+  protected LoggerChannelInterface $logger;
 
   /**
    * Constructs a ContributionUpdater object.
    *
-   * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entity_type_manager
-   *   The entity type manager.
    * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $logger_factory
    *   The logger factory.
-   * @param \Drupal\commerce_civicrm\Service\CivicrmHelper $civicrm_helper
-   *   The CiviCRM helper service.
    */
-  public function __construct(EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory, CivicrmHelper $civicrm_helper) {
-    $this->entityTypeManager = $entity_type_manager;
+  public function __construct(
+    protected readonly EntityTypeManagerInterface $entityTypeManager,
+    LoggerChannelFactoryInterface $logger_factory,
+    protected readonly CivicrmHelper $civicrmHelper,
+  ) {
     $this->logger = $logger_factory->get('commerce_civicrm');
-    $this->civicrmHelper = $civicrm_helper;
-  }
-
-  /**
-   * Initializes CiviCRM for API operations.
-   *
-   * @return bool
-   *   TRUE if CiviCRM is successfully initialized, FALSE otherwise.
-   */
-  private function initializeCivicrm() {
-    return $this->civicrmHelper->initialize();
   }
 
   /**
@@ -71,7 +46,7 @@ class ContributionUpdater {
    * @return int|null
    *   The CiviCRM contribution ID if successful, NULL otherwise.
    */
-  public function createContributionFromOrder(OrderInterface $order, $contact_id) {
+  public function createContributionFromOrder(OrderInterface $order, $contact_id): ?int {
     try {
       // Check if contribution already exists for this order
       $existing_contribution_id = $this->findExistingContribution($order);
@@ -95,7 +70,7 @@ class ContributionUpdater {
 
       // Create the contribution
       return $this->createContribution($contribution_data);
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error creating CiviCRM contribution for order @order_id: @error', [
         '@order_id' => $order->id(),
         '@error' => $e->getMessage(),
@@ -115,14 +90,16 @@ class ContributionUpdater {
    * @return array
    *   Array of contribution data.
    */
-  protected function extractContributionData(OrderInterface $order, $contact_id) {
+  protected function extractContributionData(OrderInterface $order, $contact_id): array {
     $contribution_data = [];
     
     // Basic contribution data
     $contribution_data['contact_id'] = $contact_id;
     $contribution_data['total_amount'] = $order->getTotalPrice()->getNumber();
     $contribution_data['currency'] = $order->getTotalPrice()->getCurrencyCode();
-    $contribution_data['receive_date'] = date('Y-m-d H:i:s', $order->getCompletedTime() ?: time());
+    $timestamp = $order->getCompletedTime() ?: \Drupal::time()->getRequestTime();
+    $contribution_data['receive_date'] = DrupalDateTime::createFromTimestamp($timestamp)
+      ->format('Y-m-d H:i:s');
     $contribution_data['source'] = 'Commerce Order #' . $order->id();
     
     // Get financial type ID (you may need to adjust this based on your CiviCRM setup)
@@ -144,7 +121,7 @@ class ContributionUpdater {
     }
     
     // Add custom fields for order reference
-    $contribution_data['custom_commerce_order_id'] = $order->id();
+    $contribution_data['Commerce_Order.commerce_order_id'] = (int) $order->id();
     
     return $contribution_data;
   }
@@ -158,24 +135,55 @@ class ContributionUpdater {
    * @return int|null
    *   The existing contribution ID if found, NULL otherwise.
    */
-  protected function findExistingContribution(OrderInterface $order) {
+  protected function findExistingContribution(OrderInterface $order): ?int {
     try {
       // Initialize CiviCRM
-      if (!$this->initializeCivicrm()) {
+      if (!$this->civicrmHelper->initialize()) {
         return NULL;
       }
-      
-      // Search by source field containing the order ID
+
+      $order_id = (int) $order->id();
+
+      // Primary lookup: exact match on custom field.
       $result = \Civi\Api4\Contribution::get(FALSE)
         ->addSelect('id')
-        ->addWhere('source', 'LIKE', '%Order #' . $order->id() . '%')
+        ->addWhere('Commerce_Order.commerce_order_id', '=', $order_id)
         ->setLimit(1)
         ->execute();
-      
+
       if ($result->count() > 0) {
         return $result->first()['id'];
       }
-    } catch (\Exception $e) {
+
+      // Fallback: exact source match for legacy contributions.
+      $result = \Civi\Api4\Contribution::get(FALSE)
+        ->addSelect('id')
+        ->addWhere('source', '=', 'Commerce Order #' . $order_id)
+        ->setLimit(1)
+        ->execute();
+
+      if ($result->count() > 0) {
+        $contribution_id = $result->first()['id'];
+        $this->logger->info('Found contribution @cid via source fallback for order @oid — backfilling custom field', [
+          '@cid' => $contribution_id,
+          '@oid' => $order_id,
+        ]);
+
+        try {
+          \Civi\Api4\Contribution::update(FALSE)
+            ->addWhere('id', '=', $contribution_id)
+            ->addValue('Commerce_Order.commerce_order_id', $order_id)
+            ->execute();
+        } catch (\CRM_Core_Exception $e) {
+          $this->logger->warning('Could not backfill custom field on contribution @cid: @error', [
+            '@cid' => $contribution_id,
+            '@error' => $e->getMessage(),
+          ]);
+        }
+
+        return $contribution_id;
+      }
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error finding existing CiviCRM contribution: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -193,13 +201,15 @@ class ContributionUpdater {
    * @return int|null
    *   The new contribution ID if successful, NULL otherwise.
    */
-  protected function createContribution(array $contribution_data) {
+  protected function createContribution(array $contribution_data): ?int {
     try {
       // Initialize CiviCRM
-      if (!$this->initializeCivicrm()) {
+      if (!$this->civicrmHelper->initialize()) {
         return NULL;
       }
-      
+
+      $this->ensureCustomFieldExists();
+
       $result = \Civi\Api4\Contribution::create(FALSE)
         ->setValues($contribution_data)
         ->execute();
@@ -211,7 +221,7 @@ class ContributionUpdater {
         ]);
         return $contribution_id;
       }
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error creating CiviCRM contribution: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -226,10 +236,10 @@ class ContributionUpdater {
    * @return int|null
    *   The financial type ID or NULL if not found.
    */
-  protected function getFinancialTypeId() {
+  protected function getFinancialTypeId(): ?int {
     try {
       // Initialize CiviCRM
-      if (!$this->initializeCivicrm()) {
+      if (!$this->civicrmHelper->initialize()) {
         return NULL;
       }
       
@@ -254,7 +264,7 @@ class ContributionUpdater {
       if ($result->count() > 0) {
         return $result->first()['id'];
       }
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error getting financial type ID: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -272,10 +282,10 @@ class ContributionUpdater {
    * @return int|null
    *   The contribution status ID or NULL if not found.
    */
-  protected function getContributionStatusId(OrderInterface $order) {
+  protected function getContributionStatusId(OrderInterface $order): ?int {
     try {
       // Initialize CiviCRM
-      if (!$this->initializeCivicrm()) {
+      if (!$this->civicrmHelper->initialize()) {
         return NULL;
       }
       
@@ -306,7 +316,7 @@ class ContributionUpdater {
       if ($result->count() > 0) {
         return $result->first()['value'];
       }
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error getting contribution status ID: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -324,7 +334,7 @@ class ContributionUpdater {
    * @return array
    *   Array of payment information.
    */
-  protected function getPaymentInfo(OrderInterface $order) {
+  protected function getPaymentInfo(OrderInterface $order): array {
     $payment_info = [];
     
     try {
@@ -349,7 +359,11 @@ class ContributionUpdater {
           $payment_info['trxn_id'] = $payment->getRemoteId();
         }
       }
-    } catch (\Exception $e) {
+    } catch (\Drupal\Component\Plugin\Exception\InvalidPluginDefinitionException $e) {
+      $this->logger->error('Error getting payment info: @error', [
+        '@error' => $e->getMessage(),
+      ]);
+    } catch (\Drupal\Component\Plugin\Exception\PluginNotFoundException $e) {
       $this->logger->error('Error getting payment info: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -367,10 +381,10 @@ class ContributionUpdater {
    * @return int|null
    *   The payment instrument ID or NULL if not found.
    */
-  protected function getPaymentInstrumentId($gateway_plugin_id) {
+  protected function getPaymentInstrumentId($gateway_plugin_id): ?int {
     try {
       // Initialize CiviCRM
-      if (!$this->initializeCivicrm()) {
+      if (!$this->civicrmHelper->initialize()) {
         return NULL;
       }
       
@@ -395,7 +409,7 @@ class ContributionUpdater {
       if ($result->count() > 0) {
         return $result->first()['value'];
       }
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error getting payment instrument ID: @error', [
         '@error' => $e->getMessage(),
       ]);
@@ -419,7 +433,7 @@ class ContributionUpdater {
    * @return int|null
    *   The CiviCRM contribution ID if successful, NULL otherwise.
    */
-  public function createContributionFromOrderWithFinancialType(OrderInterface $order, $contact_id, $financial_type_id, $contribution_status = 'Completed') {
+  public function createContributionFromOrderWithFinancialType(OrderInterface $order, $contact_id, $financial_type_id, $contribution_status = 'Completed'): ?int {
     try {
       // Check if contribution already exists for this order
       $existing_contribution_id = $this->findExistingContribution($order);
@@ -446,17 +460,18 @@ class ContributionUpdater {
         'financial_type_id' => $financial_type_id,
         'total_amount' => $total_price->getNumber(),
         'currency' => $total_price->getCurrencyCode(),
-        'source' => 'Drupal Commerce Order ' . $order->id(),
+        'source' => 'Commerce Order #' . $order->id(),
         'contribution_status_id' => $this->getContributionStatusIdByName($contribution_status),
-        'receive_date' => date('YmdHis'),
+        'receive_date' => (new DrupalDateTime())->format('Y-m-d H:i:s'),
         'non_deductible_amount' => 0,
         'fee_amount' => 0,
         'net_amount' => $total_price->getNumber(),
+        'Commerce_Order.commerce_order_id' => (int) $order->id(),
       ];
 
       // Create the contribution
       return $this->createContribution($contribution_data);
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error creating CiviCRM contribution for order @order_id: @error', [
         '@order_id' => $order->id(),
         '@error' => $e->getMessage(),
@@ -476,7 +491,7 @@ class ContributionUpdater {
    * @return int|null
    *   The cancelled contribution ID if successful, NULL otherwise.
    */
-  public function cancelContributionFromOrder(OrderInterface $order, $contact_id) {
+  public function cancelContributionFromOrder(OrderInterface $order, $contact_id): ?int {
     try {
       $this->logger->info('Cancelling CiviCRM contribution for order @order_id, contact @contact_id', [
         '@order_id' => $order->id(),
@@ -493,7 +508,7 @@ class ContributionUpdater {
       }
 
       // Initialize CiviCRM
-      if (!$this->initializeCivicrm()) {
+      if (!$this->civicrmHelper->initialize()) {
         return NULL;
       }
 
@@ -525,7 +540,7 @@ class ContributionUpdater {
       ]);
       return NULL;
 
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error cancelling CiviCRM contribution for order @order_id: @error', [
         '@order_id' => $order->id(),
         '@error' => $e->getMessage(),
@@ -543,10 +558,10 @@ class ContributionUpdater {
    * @return int|null
    *   The status ID if found, NULL otherwise.
    */
-  protected function getContributionStatusIdByName($status_name) {
+  protected function getContributionStatusIdByName($status_name): ?int {
     try {
       // Initialize CiviCRM
-      if (!$this->initializeCivicrm()) {
+      if (!$this->civicrmHelper->initialize()) {
         return NULL;
       }
 
@@ -560,7 +575,7 @@ class ContributionUpdater {
       if ($result->count() > 0) {
         return $result->first()['value'];
       }
-    } catch (\Exception $e) {
+    } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Error getting contribution status ID for @status: @error', [
         '@status' => $status_name,
         '@error' => $e->getMessage(),
@@ -568,6 +583,56 @@ class ContributionUpdater {
     }
 
     return NULL;
+  }
+
+  /**
+   * Ensures the Commerce_Order custom group and field exist in CiviCRM.
+   *
+   * @return bool
+   *   TRUE if the custom field exists or was created, FALSE on failure.
+   */
+  protected function ensureCustomFieldExists(): bool {
+    try {
+      $existing = \Civi\Api4\CustomGroup::get(FALSE)
+        ->addWhere('name', '=', 'Commerce_Order')
+        ->setLimit(1)
+        ->execute();
+
+      if ($existing->count() > 0) {
+        return TRUE;
+      }
+
+      $this->logger->info('Commerce_Order custom group not found — provisioning now.');
+
+      \Civi\Api4\CustomGroup::create(FALSE)
+        ->addValue('name', 'Commerce_Order')
+        ->addValue('title', 'Commerce Order')
+        ->addValue('extends', 'Contribution')
+        ->addValue('style', 'Inline')
+        ->addValue('is_active', TRUE)
+        ->addValue('collapse_display', TRUE)
+        ->execute();
+
+      \Civi\Api4\CustomField::create(FALSE)
+        ->addValue('custom_group_id:name', 'Commerce_Order')
+        ->addValue('name', 'commerce_order_id')
+        ->addValue('label', 'Commerce Order ID')
+        ->addValue('data_type', 'Int')
+        ->addValue('html_type', 'Text')
+        ->addValue('is_searchable', TRUE)
+        ->addValue('is_active', TRUE)
+        ->addValue('is_required', FALSE)
+        ->addValue('is_view', TRUE)
+        ->execute();
+
+      $this->logger->info('Commerce_Order custom group and field provisioned successfully.');
+      return TRUE;
+    } catch (\CRM_Core_Exception $e) {
+      $this->logger->error('Failed to ensure Commerce_Order custom field exists: @error', [
+        '@error' => $e->getMessage(),
+      ]);
+      return FALSE;
+    }
   }
 
 }

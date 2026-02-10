@@ -5,281 +5,215 @@ namespace Drupal\commerce_civicrm\EventSubscriber;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Drupal\state_machine\Event\WorkflowTransitionEvent;
 use Drupal\commerce_order\Entity\OrderInterface;
-
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
-use Drupal\commerce_order\Event\OrderEvent;
-use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\Logger\LoggerChannelInterface;
 use Drupal\commerce_civicrm\Service\OrderCivicrmUpdater;
 
-
 /**
- * Subscribes to Commerce order completion to create CiviCRM contact/contribution.
+ * Commerce CiviCRM Order Integration Event Subscriber.
+ * 
+ * This subscriber provides direct Commerce-to-CiviCRM integration by:
+ * 1. Listening to Commerce order workflow transitions (place, validate, fulfill, cancel)
+ * 2. Automatically creating CiviCRM records based on order contents
+ * 3. Supporting configurable product-to-CiviCRM mappings
+ * 4. Handling order cancellations and updates
  */
 class OrderCompleteSubscriber implements EventSubscriberInterface {
 
-  protected $logger;
-  protected $entityTypeManager;
-  protected $orderCivicrmUpdater;
+  /**
+   * The logger service.
+   *
+   * @var \Drupal\Core\Logger\LoggerChannelInterface
+   */
+  protected LoggerChannelInterface $logger;
 
-  public function __construct(LoggerChannelFactoryInterface $logger_factory, EntityTypeManagerInterface $entity_type_manager, OrderCivicrmUpdater $order_civicrm_updater) {
+  /**
+   * Constructs an OrderCompleteSubscriber object.
+   *
+   * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $logger_factory
+   *   The logger factory.
+   */
+  public function __construct(
+    LoggerChannelFactoryInterface $logger_factory,
+    protected readonly OrderCivicrmUpdater $orderCivicrmUpdater,
+  ) {
     $this->logger = $logger_factory->get('commerce_civicrm');
-    $this->entityTypeManager = $entity_type_manager;
-    $this->orderCivicrmUpdater = $order_civicrm_updater;
   }
 
   /**
-   * Defines the events to which this subscriber listens.
+   * {@inheritdoc}
    *
-   * The transitions are:
-   * - place (draft → completed) - when order is placed from draft state
-   * - cancel (any → canceled) - when order is canceled to canceled state
-   * - validate (validation → any) - when order validates from validation state to any state
-   * - fulfill (fulfillment → any) - when order is fulfilled from fulfillment state to any state
-   * The transitions are defined in the order workflow, typically in the
-   * 'commerce_order.workflow.order' configuration.
+   * @return array
    */
-  public static function getSubscribedEvents() {
-    $events['commerce_order.place.post_transition'] = ['onOrderPlace', -100]; // Draft → Completed
-    $events['commerce_order.cancel.post_transition'] = ['onOrderCancel', -100]; // Any → Canceled
-    $events['commerce_order.validate.post_transition'] = ['onOrderValidate', -100]; // Validation → Any
-    $events['commerce_order.fulfill.post_transition'] = ['onOrderFulfill', -100]; // Fulfillment → Any
+  public static function getSubscribedEvents(): array {
+    $events['commerce_order.place.post_transition'] = ['onOrderPlace', -50];
+    $events['commerce_order.validate.post_transition'] = ['onOrderValidate', -50];
+    $events['commerce_order.fulfill.post_transition'] = ['onOrderFulfill', -50];
+    $events['commerce_order.cancel.post_transition'] = ['onOrderCancel', -50];
     return $events;
   }
 
   /**
-   * Reacts to the order being placed (draft → completed).
+   * Handles order place events - creates CiviCRM records.
    *
-   * Uses processPlacedOrder() for initial order processing including
-   * contact creation, contribution recording, and event registrations.
-   *
-   * @param \Drupal\state_machine\Event\WorkflowTransitionEvent $event
-   * The workflow transition event.
+   * @return void
    */
-  public function onOrderPlace(WorkflowTransitionEvent $event) {
+  public function onOrderPlace(WorkflowTransitionEvent $event): void {
     /** @var \Drupal\commerce_order\Entity\OrderInterface $order */
     $order = $event->getEntity();
+    $workflow = $event->getWorkflow();
 
-    // Check that this transition is from draft state
+    // Only process commerce orders
+    if ($order->getEntityTypeId() !== 'commerce_order') {
+      return;
+    }
+    
     $from_state = $event->getFromState()->getId();
     $to_state = $event->getToState()->getId();
     
-    if ($from_state !== 'draft') {
+    // Only process transitions from draft to placed state
+    if ($from_state !== 'draft' || $to_state !== 'completed') {
+      $this->logger->debug('Skipping order @order_id - not a draft to completed transition (@from_state → @to_state) in workflow @workflow', [
+        '@order_id' => $order->id(),
+        '@from_state' => $from_state,
+        '@to_state' => $to_state,
+        '@workflow' => $workflow->getId(),
+      ]);
       return;
     }
-
-    $this->logger->info('Order @order_id has been placed (@from_state → @to_state).', [
+    
+    $this->logger->info('Processing order @order_id placement (@from_state → @to_state) in workflow @workflow for CiviCRM integration', [
       '@order_id' => $order->id(),
       '@from_state' => $from_state,
       '@to_state' => $to_state,
+      '@workflow' => $workflow->getId(),
     ]);
 
-    // Check if any order items have CiviCRM integration enabled
-    $has_civicrm_integration = $this->hasCivicrmIntegration($order);
-    
-    if ($has_civicrm_integration) {
-      // Process the placed order using the service
-      $results = $this->orderCivicrmUpdater->processPlacedOrder($order);
-      
-      if (!empty($results['contact_id'])) {
-        $this->logger->info('Successfully processed CiviCRM updates for placed order @order_id. Contact ID: @contact_id', [
-          '@order_id' => $order->id(),
-          '@contact_id' => $results['contact_id'],
-        ]);
-      } else {
-        $this->logger->error('Failed to process CiviCRM updates for placed order @order_id', [
-          '@order_id' => $order->id(),
-        ]);
-      }
-    } else {
-      $this->logger->info('No CiviCRM integration enabled for placed order @order_id', ['@order_id' => $order->id()]);
+    // Get the customer
+    $customer = $order->getCustomer();
+    if (!$customer) {
+      $this->logger->warning('Order @order_id has no customer - skipping CiviCRM integration', [
+        '@order_id' => $order->id(),
+      ]);
+      return;
     }
+
+    // Process the order through the CiviCRM updater
+    $this->orderCivicrmUpdater->processOrder($order);
   }
 
   /**
-   * Reacts to the order being canceled (any → canceled).
+   * Handles order validate events - processes CiviCRM records for validated orders.
    *
-   * Uses processCancelledOrder() to handle cancellation-specific updates
-   * including contribution status updates and participant cancellations.
-   *
-   * @param \Drupal\state_machine\Event\WorkflowTransitionEvent $event
-   * The workflow transition event.
+   * @return void
    */
-  public function onOrderCancel(WorkflowTransitionEvent $event) {
+  public function onOrderValidate(WorkflowTransitionEvent $event): void {
     /** @var \Drupal\commerce_order\Entity\OrderInterface $order */
     $order = $event->getEntity();
+    $workflow = $event->getWorkflow();
 
-    // Check that this transition is to canceled state
+    // Only process commerce orders
+    if ($order->getEntityTypeId() !== 'commerce_order') {
+      return;
+    }
+    
     $from_state = $event->getFromState()->getId();
     $to_state = $event->getToState()->getId();
     
+    $this->logger->info('Processing order @order_id validation (@from_state → @to_state) in workflow @workflow for CiviCRM integration', [
+      '@order_id' => $order->id(),
+      '@from_state' => $from_state,
+      '@to_state' => $to_state,
+      '@workflow' => $workflow->getId(),
+    ]);
+
+    // Get the customer
+    $customer = $order->getCustomer();
+    if (!$customer) {
+      $this->logger->warning('Order @order_id has no customer - skipping CiviCRM integration', [
+        '@order_id' => $order->id(),
+      ]);
+      return;
+    }
+
+    // Process the order through the CiviCRM updater
+    $this->orderCivicrmUpdater->processOrder($order);
+  }
+
+  /**
+   * Handles order fulfill events - processes CiviCRM records for fulfilled orders.
+   *
+   * @return void
+   */
+  public function onOrderFulfill(WorkflowTransitionEvent $event): void {
+    /** @var \Drupal\commerce_order\Entity\OrderInterface $order */
+    $order = $event->getEntity();
+    $workflow = $event->getWorkflow();
+
+    // Only process commerce orders
+    if ($order->getEntityTypeId() !== 'commerce_order') {
+      return;
+    }
+    
+    $from_state = $event->getFromState()->getId();
+    $to_state = $event->getToState()->getId();
+    
+    $this->logger->info('Processing order @order_id fulfillment (@from_state → @to_state) in workflow @workflow for CiviCRM integration', [
+      '@order_id' => $order->id(),
+      '@from_state' => $from_state,
+      '@to_state' => $to_state,
+      '@workflow' => $workflow->getId(),
+    ]);
+
+    // Get the customer
+    $customer = $order->getCustomer();
+    if (!$customer) {
+      $this->logger->warning('Order @order_id has no customer - skipping CiviCRM integration', [
+        '@order_id' => $order->id(),
+      ]);
+      return;
+    }
+
+    // Process the order through the CiviCRM updater
+    $this->orderCivicrmUpdater->processOrder($order);
+  }
+
+  /**
+   * Handles order cancel events - updates CiviCRM records.
+   *
+   * @return void
+   */
+  public function onOrderCancel(WorkflowTransitionEvent $event): void {
+    /** @var \Drupal\commerce_order\Entity\OrderInterface $order */
+    $order = $event->getEntity();
+    $workflow = $event->getWorkflow();
+
+    // Only process commerce orders
+    if ($order->getEntityTypeId() !== 'commerce_order') {
+      return;
+    }
+    
+    // Only process transitions to canceled state
+    $to_state = $event->getToState()->getId();
     if ($to_state !== 'canceled') {
       return;
     }
 
-    $this->logger->info('Order @order_id has been canceled (@from_state → @to_state).', [
-      '@order_id' => $order->id(),
-      '@from_state' => $from_state,
-      '@to_state' => $to_state,
-    ]);
-
-    // Check if any order items have CiviCRM integration enabled
-    $has_civicrm_integration = $this->hasCivicrmIntegration($order);
-    
-    if ($has_civicrm_integration) {
-      // Handle order cancellation - update CiviCRM records accordingly
-      $results = $this->orderCivicrmUpdater->processCancelledOrder($order);
-      
-      if (!empty($results['success'])) {
-        $this->logger->info('Successfully processed CiviCRM cancellation updates for order @order_id', [
-          '@order_id' => $order->id(),
-        ]);
-      } else {
-        $this->logger->error('Failed to process CiviCRM cancellation updates for order @order_id. Errors: @errors', [
-          '@order_id' => $order->id(),
-          '@errors' => implode(', ', $results['errors'] ?? []),
-        ]);
-      }
-    }
-  }
-
-  /**
-   * Reacts to the order being validated (validation → any state).
-   *
-   * Uses processCompletedOrder() for comprehensive processing including
-   * contact updates, contributions, memberships, events, and mailing subscriptions.
-   *
-   * @param \Drupal\state_machine\Event\WorkflowTransitionEvent $event
-   * The workflow transition event.
-   */
-  public function onOrderValidate(WorkflowTransitionEvent $event) {
-    /** @var \Drupal\commerce_order\Entity\OrderInterface $order */
-    $order = $event->getEntity();
-
-    // Check that this transition is from validation state
     $from_state = $event->getFromState()->getId();
-    $to_state = $event->getToState()->getId();
     
-    if ($from_state !== 'validation') {
-      return;
-    }
-
-    $this->logger->info('Order @order_id has been validated (@from_state → @to_state).', [
+    $this->logger->info('Processing order @order_id cancellation (@from_state → @to_state) in workflow @workflow for CiviCRM integration', [
       '@order_id' => $order->id(),
       '@from_state' => $from_state,
       '@to_state' => $to_state,
+      '@workflow' => $workflow->getId(),
     ]);
 
-    // Check if any order items have CiviCRM integration enabled
-    $has_civicrm_integration = $this->hasCivicrmIntegration($order);
-    
-    if ($has_civicrm_integration) {
-      // Process the validated order using the service
-      $results = $this->orderCivicrmUpdater->processCompletedOrder($order);
-      
-      if (!empty($results['contact_id'])) {
-        $this->logger->info('Successfully processed CiviCRM updates for validated order @order_id (@from_state → @to_state). Contact ID: @contact_id', [
-          '@order_id' => $order->id(),
-          '@from_state' => $from_state,
-          '@to_state' => $to_state,
-          '@contact_id' => $results['contact_id'],
-        ]);
-      } else {
-        $this->logger->error('Failed to process CiviCRM updates for validated order @order_id (@from_state → @to_state)', [
-          '@order_id' => $order->id(),
-          '@from_state' => $from_state,
-          '@to_state' => $to_state,
-        ]);
-      }
-    } else {
-      $this->logger->info('No CiviCRM integration enabled for validated order @order_id (@from_state → @to_state)', [
-        '@order_id' => $order->id(),
-        '@from_state' => $from_state,
-        '@to_state' => $to_state,
-      ]);
-    }
-  }
-
-  /**
-   * Reacts to the order being fulfilled (fulfillment → any state).
-   *
-   * Uses processCompletedOrder() for final processing including any
-   * remaining CiviCRM updates like membership activations or final mailings.
-   *
-   * @param \Drupal\state_machine\Event\WorkflowTransitionEvent $event
-   * The workflow transition event.
-   */
-  public function onOrderFulfill(WorkflowTransitionEvent $event) {
-    /** @var \Drupal\commerce_order\Entity\OrderInterface $order */
-    $order = $event->getEntity();
-
-    // Check that this transition is from fulfillment state
-    $from_state = $event->getFromState()->getId();
-    $to_state = $event->getToState()->getId();
-    
-    if ($from_state !== 'fulfillment') {
-      return;
-    }
-
-    $this->logger->info('Order @order_id has been fulfilled (@from_state → @to_state).', [
+    // Process the order cancellation through the CiviCRM updater
+    $cancelled_records = $this->orderCivicrmUpdater->processCancellation($order);
+    $this->logger->info('Order @order_id cancellation complete. Cancelled records: @records', [
       '@order_id' => $order->id(),
-      '@from_state' => $from_state,
-      '@to_state' => $to_state,
+      '@records' => json_encode($cancelled_records),
     ]);
-
-    // Check if any order items have CiviCRM integration enabled
-    $has_civicrm_integration = $this->hasCivicrmIntegration($order);
-    
-    if ($has_civicrm_integration) {
-      // Handle order fulfillment - process any final CiviCRM updates
-      $results = $this->orderCivicrmUpdater->processCompletedOrder($order);
-      
-      if (!empty($results['contact_id'])) {
-        $this->logger->info('Successfully processed CiviCRM fulfillment updates for order @order_id (@from_state → @to_state). Contact ID: @contact_id', [
-          '@order_id' => $order->id(),
-          '@from_state' => $from_state,
-          '@to_state' => $to_state,
-          '@contact_id' => $results['contact_id'],
-        ]);
-      } else {
-        $this->logger->error('Failed to process CiviCRM fulfillment updates for order @order_id (@from_state → @to_state)', [
-          '@order_id' => $order->id(),
-          '@from_state' => $from_state,
-          '@to_state' => $to_state,
-        ]);
-      }
-    } else {
-      $this->logger->info('No CiviCRM integration enabled for fulfilled order @order_id (@from_state → @to_state)', [
-        '@order_id' => $order->id(),
-        '@from_state' => $from_state,
-        '@to_state' => $to_state,
-      ]);
-    }
   }
 
-  /**
-   * Checks if any order items have CiviCRM integration enabled.
-   *
-   * @param \Drupal\commerce_order\Entity\OrderInterface $order
-   *   The Commerce Order entity.
-   *
-   * @return bool
-   *   TRUE if CiviCRM integration is enabled, FALSE otherwise.
-   */
-  private function hasCivicrmIntegration(OrderInterface $order) {
-    foreach ($order->getItems() as $order_item) {
-      $purchased_entity = $order_item->getPurchasedEntity();
-      if ($purchased_entity && $purchased_entity->hasField('product_id')) {
-        $product = $purchased_entity->get('product_id')->entity;
-        if ($product && $product->hasField('field_civicrm') && !$product->get('field_civicrm')->isEmpty()) {
-          $civicrm_settings_raw = $product->get('field_civicrm')->value;
-          $civicrm_settings = json_decode($civicrm_settings_raw, TRUE);
-          
-          if (!empty($civicrm_settings['enabled'])) {
-            return TRUE;
-          }
-        }
-      }
-    }
-    return FALSE;
-  }
 }

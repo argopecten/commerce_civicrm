@@ -1,1 +1,17 @@
+# IDE / Editor
 .vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies
+/vendor/
+/node_modules/
+
+# Composer
+composer.lock

@@ -1,224 +1,245 @@
 # Troubleshooting
 
-## Common Issues and Solutions
+## Installation Issues
 
-### Installation Issues
+### CiviCRM Integration Section Not Visible on Product Forms
 
-#### Field Not Added to Product Types
-**Symptoms**: CiviCRM Integration section not visible on product edit forms
+The `field_civicrm` field may be missing from the product type.
 
-**Solutions**:
-1. **Check Module Installation**:
-   ```bash
-   drush pm:list | grep commerce_civicrm
-   ```
+**Check**:
 
-2. **Manually Add Fields**:
-   ```php
-   // Add field to all product types
-   $results = commerce_civicrm_add_field_to_all_product_types();
-   
-   // Add field to specific product type
-   $success = commerce_civicrm_add_field_to_product_type('my_product_type');
-   ```
-
-3. **Check Field Display**:
-   - Go to product type manage display settings
-   - Ensure CiviCRM field is not hidden
-
-#### CiviCRM Not Available
-**Symptoms**: "CiviCRM not available" errors in logs
-
-**Solutions**:
-1. **Check CiviCRM Status**: Visit `/admin/reports/status`
-2. **Verify CiviCRM Module**: Ensure CiviCRM module is enabled
-3. **Database Connectivity**: Check CiviCRM database connection
-4. **Permissions**: Verify CiviCRM access permissions
-
-### Configuration Issues
-
-#### Entity Options Not Loading
-**Symptoms**: Dropdown lists empty in product configuration
-
-**Solutions**:
-1. **CiviCRM Connectivity**: Verify CiviCRM is accessible
-2. **API Permissions**: Check CiviCRM API permissions
-3. **Entity Status**: Ensure entities are active in CiviCRM
-4. **Clear Cache**: Clear Drupal and CiviCRM caches
-
-#### Configuration Not Saving
-**Symptoms**: Product configuration resets after saving
-
-**Solutions**:
-1. **Field Permissions**: Check field edit permissions
-2. **Form Validation**: Look for validation errors
-3. **JSON Format**: Verify configuration data is valid JSON
-4. **Field Storage**: Check field storage configuration
-
-### Order Processing Issues
-
-#### Contacts Not Created
-**Symptoms**: Orders complete but no CiviCRM contacts created
-
-**Diagnostic Steps**:
-1. **Check Billing Profile**: Ensure orders have complete billing profiles
-2. **Review Logs**: Look for contact creation errors
-3. **Verify Email**: Check that customer email addresses are valid
-4. **Test API**: Test CiviCRM contact creation directly
-
-**Solutions**:
-```php
-// Test contact creation
-$contact_updater = \Drupal::service('commerce_civicrm.contact_updater');
-$contact_id = $contact_updater->updateContactFromOrder($order);
+```bash
+drush php:eval "echo \Drupal\field\Entity\FieldStorageConfig::loadByName('commerce_product', 'field_civicrm') ? 'storage exists' : 'storage missing';"
 ```
 
-#### Contributions Not Appearing
-**Symptoms**: Orders process but no contributions in CiviCRM
+**Fix**:
 
-**Diagnostic Steps**:
-1. **Product Configuration**: Verify products have CiviCRM integration enabled
-2. **Financial Types**: Check that financial type IDs are valid
-3. **Order State**: Ensure orders reached "completed" state
-4. **Duplicate Check**: Look for existing contributions
-
-**Solutions**:
-1. **Check Product Settings**:
-   ```php
-   $settings = commerce_civicrm_get_product_settings($product);
-   var_dump($settings);
-   ```
-
-2. **Test Contribution Creation**:
-   ```php
-   $contribution_updater = \Drupal::service('commerce_civicrm.contribution_updater');
-   $contribution_id = $contribution_updater->createContributionFromOrder($order);
-   ```
-
-#### Event Registrations Failing
-**Symptoms**: Event products purchased but no CiviCRM registrations
-
-**Diagnostic Steps**:
-1. **Event Status**: Verify events are active and public in CiviCRM
-2. **Event Dates**: Check that events haven't ended
-3. **Participant Roles**: Verify participant role IDs are valid
-4. **Duplicate Prevention**: Check for existing registrations
-
-#### Mailing Subscriptions Not Working
-**Symptoms**: Mailing products purchased but contacts not added to groups
-
-**Diagnostic Steps**:
-1. **Group Configuration**: Verify mailing groups exist and are active
-2. **Group Type**: Ensure groups are configured as mailing lists
-3. **Subscription Settings**: Check mailing preferences configuration
-4. **Contact Existence**: Verify contacts exist before group addition
-
-### Performance Issues
-
-#### Slow Order Processing
-**Symptoms**: Orders take long time to complete
-
-**Diagnostic Steps**:
-1. **CiviCRM Performance**: Check CiviCRM database performance
-2. **API Calls**: Review number of CiviCRM API calls per order
-3. **Network Latency**: Test CiviCRM connectivity speed
-4. **Resource Usage**: Monitor server resources during processing
-
-**Solutions**:
-1. **Optimize API Calls**: Batch operations where possible
-2. **Cache Results**: Cache frequently accessed CiviCRM data
-3. **Queue Processing**: Consider moving processing to background queues
-4. **Database Optimization**: Optimize CiviCRM database queries
-
-### Logging and Debugging
-
-#### Enable Debug Logging
 ```php
-// In settings.php
+// Add to all product types:
+commerce_civicrm_add_field_to_all_product_types();
+
+// Or add to a specific product type:
+commerce_civicrm_add_field_to_product_type('my_product_type');
+```
+
+Then clear caches: `drush cr`.
+
+### CiviCRM Not Available
+
+**Symptoms**: "CiviCRM is not available" errors in logs, warning on status page.
+
+**Diagnostic steps**:
+
+1. Check status page: `/admin/reports/status`
+2. Verify CiviCRM module is enabled: `drush pm:list | grep civicrm`
+3. Check if CiviCRM is in maintenance mode (upgrade active or environment set
+   to `Maintenance`)
+4. Test CiviCRM access directly: visit `/civicrm`
+
+**Check programmatically**:
+
+```php
+$helper = \Drupal::service('commerce_civicrm.civicrm_helper');
+var_dump($helper->isAvailable());           // Basic availability
+var_dump($helper->isReadyForOperations());  // Availability + not in maintenance
+```
+
+## Configuration Issues
+
+### Entity Option Dropdowns Are Empty
+
+The product form dropdowns (membership types, financial types, events, mailing
+groups) are populated live from CiviCRM.
+
+**Possible causes**:
+
+- CiviCRM is unavailable or in maintenance mode
+- No active entities of that type exist in CiviCRM (e.g., no active events)
+- CiviCRM API access issue
+
+**Fix**: Verify CiviCRM connectivity first, then check that at least one entity
+of the relevant type is active in CiviCRM.
+
+### Product Settings Not Saving
+
+**Check** that `field_civicrm` exists on the product type:
+
+```php
+$field = \Drupal\field\Entity\FieldConfig::loadByName('commerce_product', 'default', 'field_civicrm');
+var_dump($field ? 'exists' : 'missing');
+```
+
+**Check** current stored settings:
+
+```php
+$product = \Drupal\commerce_product\Entity\Product::load($product_id);
+$raw = $product->get('field_civicrm')->value;
+echo $raw; // Should be a JSON string
+```
+
+## Order Processing Issues
+
+### No CiviCRM Records Created After Order Completion
+
+**Step 1 — Check logs**: `/admin/reports/dblog`, filter by `commerce_civicrm`.
+Look for error or warning messages for the order ID.
+
+**Step 2 — Verify product configuration**:
+
+```php
+$product = \Drupal\commerce_product\Entity\Product::load($product_id);
+$settings = json_decode($product->get('field_civicrm')->value, TRUE);
+var_dump($settings);
+// Expected: ['enabled' => true, 'entity' => '...', 'entity_id' => ...]
+```
+
+If `enabled` is `false` or missing, the product is not configured for CiviCRM.
+
+**Step 3 — Verify order reached the right state**:
+
+```php
+$order = \Drupal\commerce_order\Entity\Order::load($order_id);
+echo $order->getState()->getId(); // Should be 'completed'
+```
+
+For the default workflow, only `draft → completed` triggers processing.
+
+**Step 4 — Test processing manually**:
+
+```php
+$order = \Drupal\commerce_order\Entity\Order::load($order_id);
+$updater = \Drupal::service('commerce_civicrm.order_civicrm_updater');
+$results = $updater->processOrder($order);
+var_dump($results);
+```
+
+### Contact Not Created in CiviCRM
+
+**Possible causes**:
+
+- Order has no customer (anonymous checkout)
+- Customer has no email address
+- CiviCRM deduplication rule matched multiple contacts ambiguously
+
+**Check**:
+
+```php
+$order = \Drupal\commerce_order\Entity\Order::load($order_id);
+$customer = $order->getCustomer();
+echo $customer ? 'user ' . $customer->id() : 'no customer';
+
+$updater = \Drupal::service('commerce_civicrm.contact_updater');
+$contact_id = $updater->getContactIdByUser($customer);
+echo $contact_id ? 'contact ' . $contact_id : 'no contact found';
+```
+
+### Contributions Created But No Membership
+
+This happens when the product is configured with a financial type but no
+membership type. For linked membership+contribution, the product must have
+**both** `membership_type_id` (entity type = membership) and a financial type
+configured.
+
+### Event Products Not Creating Registrations
+
+**This is expected** — event participant creation (`Participant::create()`) is
+not yet implemented. The product form UI supports event configuration, but the
+backend `processOrderItem()` has no `event` branch. See
+[FMO #32](../fmo/32-advanced-civicrm-integration.md) §4.
+
+### Mailing Subscriptions Not Reversed on Cancellation
+
+**This is a known gap** — `processCancellation()` handles memberships and
+contributions but does not call `MailingUpdater::removeContactFromMailingGroup()`
+for mailing products. The contact remains in the group after order cancellation.
+
+### Duplicate Contributions in CiviCRM
+
+**Possible cause**: You are using a **fulfillment workflow** (`order_default_validation`).
+Both `onOrderValidate()` and `onOrderFulfill()` call `processOrder()` without
+state guards. The linked membership+contribution path has a duplicate guard, but
+standalone contributions do not.
+
+**Workaround**: Use the default workflow (`order_default`) which only fires
+`onOrderPlace()` with a proper `draft → completed` guard.
+
+See [todo #37](../development/todo.md) for the tracked bug.
+
+## Logging and Debugging
+
+### View Module Logs
+
+1. Go to `/admin/reports/dblog`
+2. Filter by type: `commerce_civicrm`
+3. Review error, warning, and info messages
+
+### Enable Verbose Logging
+
+```php
+// In settings.php:
 $config['system.logging']['error_level'] = 'verbose';
 ```
 
-#### View Commerce CiviCRM Logs
-1. Go to `/admin/reports/dblog`
-2. Filter by "commerce_civicrm" channel
-3. Review error, warning, and info messages
+This enables debug-level messages (per-item processing details, product settings).
 
-#### Common Log Messages
+### Common Log Messages
 
-**Successful Operations**:
+**Successful operations**:
+
 ```
-INFO: Created CiviCRM contact 123 for order 456
-INFO: Created contribution 789 for order 456
-INFO: Registered participant 101 for event 5
+INFO: Processing order 456 placement (draft → completed) in workflow order_default
+INFO: Found 2 order items to process for order 456
+INFO: Created membership 789 for order item 1 (order 456)
+INFO: Created contribution 101 for order item 2 (order 456)
+INFO: Completed processing order 456. Created records: {"memberships":[789],"contributions":[101]}
 ```
 
 **Warnings**:
+
 ```
-WARNING: Billing profile incomplete for order 456
-WARNING: Event 5 not found or inactive
-WARNING: Contact already exists in mailing group 3
+WARNING: Order 456 has no customer - skipping CiviCRM integration
+WARNING: Could not find or create CiviCRM contact for user 12
+WARNING: Failed to create membership for type 3
+WARNING: CiviCRM integration not enabled for product 7 - skipping
 ```
 
 **Errors**:
-```
-ERROR: CiviCRM not available
-ERROR: Failed to create contribution: Invalid financial type 999
-ERROR: API error: Contact creation failed
-```
 
-### Diagnostic Tools
-
-#### Test Contact Creation
-```php
-$order = \Drupal\commerce_order\Entity\Order::load($order_id);
-$contact_updater = \Drupal::service('commerce_civicrm.contact_updater');
-$contact_id = $contact_updater->updateContactFromOrder($order);
+```
+ERROR: CiviCRM is not available - skipping order 456 processing
+ERROR: Error processing order item 2 for order 456: Invalid financial type
 ```
 
-#### Test Full Order Processing
-```php
-$order = \Drupal\commerce_order\Entity\Order::load($order_id);
-$order_updater = \Drupal::service('commerce_civicrm.order_civicrm_updater');
-$results = $order_updater->processCompletedOrder($order);
-```
+## Diagnostic Quick Reference
 
-#### Check CiviCRM Connectivity
-```php
-$helper = \Drupal::service('commerce_civicrm.civicrm_helper');
-$available = $helper->isCivicrmAvailable();
-```
+| Symptom | First Check | Service/Method |
+|---------|------------|---------------|
+| CiviCRM unavailable | `/admin/reports/status` | `CivicrmHelper::isAvailable()` |
+| No records created | Product `field_civicrm` JSON | `OrderCivicrmUpdater::getCivicrmProductSettings()` |
+| Contact not found | Customer has email? | `ContactUpdater::getContactIdByUser()` |
+| Duplicate contributions | Which workflow? | Check `order.getState()` |
+| Event not registered | Expected — not implemented | See FMO #32 §4 |
+| Mailing not cancelled | Expected — not implemented | See FMO #31 §4 |
 
-### Getting Help
+## Getting Help
 
-#### Before Seeking Support
-1. **Check Logs**: Review all relevant log messages
-2. **Test Configuration**: Verify all configuration settings
-3. **Isolate Issue**: Test with minimal configuration
-4. **Document Steps**: Record exact steps to reproduce the issue
+### Before Seeking Support
 
-#### Information to Provide
-- Drupal and CiviCRM versions
-- Module version
-- Error messages from logs
-- Steps to reproduce the issue
-- Configuration details (sanitized)
+1. **Check logs** at `/admin/reports/dblog` filtered by `commerce_civicrm`
+2. **Verify product configuration** — inspect `field_civicrm` JSON
+3. **Test with minimal setup** — single product, default workflow
+4. **Note versions** — Drupal, Commerce, CiviCRM, PHP, and module version
 
-#### Support Resources
-- Module documentation
-- Drupal.org issue queue
-- CiviCRM community forums
-- Local Drupal user groups
+### Information to Provide
 
-### Prevention Tips
+- Drupal core version, Commerce version, CiviCRM version
+- Commerce workflow in use (default vs fulfillment)
+- Product `field_civicrm` JSON value
+- Relevant log messages from `commerce_civicrm` channel
+- Steps to reproduce
 
-#### Regular Maintenance
-1. **Monitor Logs**: Regularly check for warning and error messages
-2. **Test Configurations**: Verify product configurations after CiviCRM updates
-3. **Backup Data**: Maintain backups of both Drupal and CiviCRM databases
-4. **Update Modules**: Keep modules updated to latest stable versions
+### Resources
 
-#### Best Practices
-1. **Development Testing**: Always test in development environment first
-2. **Documentation**: Document your CiviCRM entity IDs and configurations
-3. **Monitoring**: Set up automated monitoring for critical operations
-4. **Training**: Ensure staff understand the integration workflow
+- Module documentation: `doc/` directory
+- Service reference: [Services Overview](../services/overview.md)
+- Development backlog: [todo.md](../development/todo.md)

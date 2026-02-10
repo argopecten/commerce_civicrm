@@ -1,29 +1,33 @@
 # This file defines the services provided by the Commerce CiviCRM module.
-# Direct Commerce-to-CiviCRM integration without Rules dependency.
 services:
 
-  ### Event Subscriber for Direct Commerce Integration
-  # Listens to Commerce order workflow transitions and processes CiviCRM updates
+  ### Event Subscribers
+  # Commerce-style direct integration event subscriber.
+  # Handles order workflow transitions and creates CiviCRM records automatically.
   commerce_civicrm.order_complete_subscriber:
     class: Drupal\commerce_civicrm\EventSubscriber\OrderCompleteSubscriber
     arguments: 
       - '@logger.factory'
-      - '@entity_type.manager'
       - '@commerce_civicrm.order_civicrm_updater'
     tags:
       - { name: event_subscriber }
 
-  ### Core CiviCRM Integration Services
-  # Orchestrator service that coordinates all CiviCRM updates from Commerce Orders
+  ### Services for CiviCRM integration used by direct Commerce integration
+  # These services provide CiviCRM API access and are used by:
+  # 1. OrderCivicrmUpdater for automatic order processing
+  # 2. Custom extensions for additional CiviCRM operations
+
+  # Service for processing Commerce orders and creating CiviCRM records
+  # This is the main service that coordinates order processing
   commerce_civicrm.order_civicrm_updater:
     class: Drupal\commerce_civicrm\Service\OrderCivicrmUpdater
     arguments:
+      - '@logger.factory'
+      - '@commerce_civicrm.civicrm_helper'
       - '@commerce_civicrm.contact_updater'
       - '@commerce_civicrm.contribution_updater'
       - '@commerce_civicrm.membership_updater'
-      - '@commerce_civicrm.event_updater'
       - '@commerce_civicrm.mailing_updater'
-      - '@logger.factory'
     tags:
       - { name: service }
 
@@ -57,17 +61,7 @@ services:
     tags:
       - { name: service }
 
-  # Service for updating CiviCRM events based on Commerce Order data
-  commerce_civicrm.event_updater:
-    class: Drupal\commerce_civicrm\Service\EventUpdater
-    arguments:
-      - '@entity_type.manager'
-      - '@logger.factory'
-      - '@commerce_civicrm.civicrm_helper'
-    tags:
-      - { name: service }
-
-  # Service for updating CiviCRM mailing groups based on Commerce Order data
+  # Service for updating CiviCRM mailing group subscriptions
   commerce_civicrm.mailing_updater:
     class: Drupal\commerce_civicrm\Service\MailingUpdater
     arguments:
@@ -82,6 +76,16 @@ services:
     class: Drupal\commerce_civicrm\Service\CivicrmHelper
     arguments:
       - '@logger.factory'
+      - '@module_handler'
+      - '@?civicrm'
     tags:
       - { name: service }
 
+  # Service for handling CiviCRM settings on Commerce product edit forms
+  commerce_civicrm.product_form_helper:
+    class: Drupal\commerce_civicrm\Service\ProductFormHelper
+    arguments:
+      - '@logger.factory'
+      - '@commerce_civicrm.civicrm_helper'
+      - '@commerce_civicrm.membership_updater'
+      - '@commerce_civicrm.contact_updater'
