@@ -1,0 +1,53 @@
+commerce_civicrm.settings:
+  type: config_object
+  label: 'Commerce CiviCRM settings'
+  mapping:
+    order:
+      type: mapping
+      label: 'Order processing'
+      mapping:
+        create_transitions:
+          type: sequence
+          label: 'Transitions that trigger record creation'
+          sequence:
+            type: string
+            label: 'Transition ID'
+        cancel_transitions:
+          type: sequence
+          label: 'Transitions that trigger cancellation'
+          sequence:
+            type: string
+            label: 'Transition ID'
+        workflows:
+          type: sequence
+          label: 'Workflow allowlist (empty = all)'
+          sequence:
+            type: string
+            label: 'Workflow ID'
+    contact:
+      type: mapping
+      label: 'Contact resolution'
+      mapping:
+        fallback:
+          type: string
+          label: 'Fallback when no UFMatch exists (none | match_or_create)'
+    contribution:
+      type: mapping
+      label: 'Contribution settings'
+      mapping:
+        payment_instrument_map:
+          type: sequence
+          label: 'Gateway ID to payment instrument name map'
+          sequence:
+            type: string
+            label: 'Payment instrument name'
+        payment_instrument_default:
+          type: string
+          label: 'Default payment instrument name'
+    membership:
+      type: mapping
+      label: 'Membership settings'
+      mapping:
+        date_mode:
+          type: string
+          label: 'Membership date mode (civicrm | dispatch)'

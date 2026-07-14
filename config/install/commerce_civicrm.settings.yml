@@ -1,0 +1,26 @@
+order:
+  # Workflow transition IDs that trigger CiviCRM record creation.
+  create_transitions:
+    - place
+  # Workflow transition IDs that trigger CiviCRM record cancellation.
+  cancel_transitions:
+    - cancel
+  # Optional allowlist of workflow IDs to process. Empty means all workflows.
+  workflows: []
+contact:
+  # How to resolve the CiviCRM contact for an order when the customer has no
+  # UFMatch record yet: 'none' skips processing, 'match_or_create' matches by
+  # email/dedupe rule and creates an Individual as a last resort.
+  fallback: none
+contribution:
+  # Maps Commerce payment gateway config entity IDs (preferred) or gateway
+  # plugin IDs to CiviCRM payment instrument names.
+  payment_instrument_map:
+    manual: Cash
+    paypal: PayPal
+  # Payment instrument name used when no map entry matches.
+  payment_instrument_default: Credit Card
+membership:
+  # 'civicrm' omits end_date so CiviCRM computes it from the membership type;
+  # 'dispatch' fires MembershipDatesEvent so site code can supply dates.
+  date_mode: civicrm
