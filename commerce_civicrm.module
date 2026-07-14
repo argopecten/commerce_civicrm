@@ -37,16 +37,15 @@ function commerce_civicrm_help($route_name, RouteMatchInterface $route_match) {
       $output .= '<h3>' . t('Requirements') . '</h3>';
       $output .= '<ul>';
       $output .= '<li>' . t('CiviCRM module properly installed and configured') . '</li>';
-      $output .= '<li>' . t('CiviCRM Tools module for modern API access') . '</li>';
       $output .= '<li>' . t('Drupal Commerce with Product, Order, and Payment modules') . '</li>';
       $output .= '</ul>';
-      
+
       $output .= '<h3>' . t('Configuration') . '</h3>';
       $output .= '<p>' . t('The module uses product field configuration for automation:') . '</p>';
       $output .= '<ol>';
-      $output .= '<li>' . t('Add CiviCRM fields to your Commerce product types: field_civicrm_membership_type and field_civicrm_financial_type.') . '</li>';
-      $output .= '<li>' . t('Edit any Commerce product to configure CiviCRM integration through these fields.') . '</li>';
-      $output .= '<li>' . t('Set field values to specify which CiviCRM records to create when the product is purchased.') . '</li>';
+      $output .= '<li>' . t('Configure which order workflow transitions trigger processing in commerce_civicrm.settings (order.create_transitions / order.cancel_transitions).') . '</li>';
+      $output .= '<li>' . t('Edit any Commerce product and use the "CiviCRM Integration" section to choose the record type (contribution, membership, event registration or mailing subscription).') . '</li>';
+      $output .= '<li>' . t('The configuration is stored as JSON in the hidden field_civicrm product field; type references are stored by name so shared catalogs work across sites.') . '</li>';
       $output .= '<li>' . t('Test by placing an order and verifying CiviCRM records are created automatically.') . '</li>';
       $output .= '</ol>';
       
@@ -61,20 +60,12 @@ function commerce_civicrm_help($route_name, RouteMatchInterface $route_match) {
       $output .= '<li>' . t('Use the "My CiviCRM Orders" view to let customers see their order history.') . '</li>';
       $output .= '</ul>';
       
-      $output .= '<h3>' . t('Product Field Configuration') . '</h3>';
-      $output .= '<p>' . t('The module uses product fields for configuration:') . '</p>';
-      $output .= '<ul>';
-      $output .= '<li>' . t('<strong>field_civicrm_membership_type:</strong> Set to create memberships when product is purchased') . '</li>';
-      $output .= '<li>' . t('<strong>field_civicrm_financial_type:</strong> Set to create contributions with specific financial type') . '</li>';
-      $output .= '</ul>';
-      
       $output .= '<h3>' . t('Troubleshooting') . '</h3>';
       $output .= '<p>' . t('If you encounter issues:') . '</p>';
       $output .= '<ul>';
       $output .= '<li>' . t('Check the Status Report (admin/reports/status) for CiviCRM connectivity issues.') . '</li>';
-      $output .= '<li>' . t('Review the Commerce CiviCRM log messages at admin/reports/dblog.') . '</li>';
-      $output .= '<li>' . t('Ensure CiviCRM and CiviCRM Tools modules are properly configured.') . '</li>';
-      $output .= '<li>' . t('Verify that customer profiles contain the necessary contact information.') . '</li>';
+      $output .= '<li>' . t('Review the commerce_civicrm log channel messages.') . '</li>';
+      $output .= '<li>' . t('Verify that customer accounts are linked to CiviCRM contacts (UFMatch), or enable the match_or_create contact fallback.') . '</li>';
       $output .= '</ul>';
       
       return $output;

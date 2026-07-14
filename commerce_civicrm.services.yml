@@ -2,23 +2,21 @@
 services:
 
   ### Event Subscribers
-  # Commerce-style direct integration event subscriber.
-  # Handles order workflow transitions and creates CiviCRM records automatically.
+  # Routes commerce_order.post_transition events to CiviCRM processing based
+  # on the configured create/cancel transition IDs.
   commerce_civicrm.order_complete_subscriber:
     class: Drupal\commerce_civicrm\EventSubscriber\OrderCompleteSubscriber
-    arguments: 
+    arguments:
       - '@logger.factory'
       - '@commerce_civicrm.order_civicrm_updater'
+      - '@config.factory'
     tags:
       - { name: event_subscriber }
 
   ### Services for CiviCRM integration used by direct Commerce integration
-  # These services provide CiviCRM API access and are used by:
-  # 1. OrderCivicrmUpdater for automatic order processing
-  # 2. Custom extensions for additional CiviCRM operations
 
-  # Service for processing Commerce orders and creating CiviCRM records
-  # This is the main service that coordinates order processing
+  # Orchestrator: resolves order items into directives and creates CiviCRM
+  # records through the Order API (one contribution per Commerce order).
   commerce_civicrm.order_civicrm_updater:
     class: Drupal\commerce_civicrm\Service\OrderCivicrmUpdater
     arguments:
@@ -28,60 +26,72 @@ services:
       - '@commerce_civicrm.contribution_updater'
       - '@commerce_civicrm.membership_updater'
       - '@commerce_civicrm.mailing_updater'
-    tags:
-      - { name: service }
+      - '@commerce_civicrm.participant_updater'
+      - '@event_dispatcher'
+      - '@config.factory'
+      - '@datetime.time'
 
-  # Service for updating CiviCRM contacts based on Commerce Order data
+  # Records renewal payments (recurring charges without an order transition)
+  # for already-processed orders. Site code calls recordRenewalPayment().
+  commerce_civicrm.renewal_processor:
+    class: Drupal\commerce_civicrm\Service\RenewalProcessor
+    arguments:
+      - '@logger.factory'
+      - '@commerce_civicrm.civicrm_helper'
+      - '@commerce_civicrm.order_civicrm_updater'
+      - '@commerce_civicrm.contribution_updater'
+      - '@event_dispatcher'
+
+  # Contact resolution (UFMatch, match-or-create fallback) and option lists.
   commerce_civicrm.contact_updater:
     class: Drupal\commerce_civicrm\Service\ContactUpdater
-    arguments: 
+    arguments:
       - '@entity_type.manager'
       - '@logger.factory'
       - '@commerce_civicrm.civicrm_helper'
-    tags:
-      - { name: service }
 
-  # Service for updating CiviCRM contributions based on Commerce Order data
+  # Contribution lookups, payment instrument mapping and cancellation.
   commerce_civicrm.contribution_updater:
     class: Drupal\commerce_civicrm\Service\ContributionUpdater
     arguments:
       - '@entity_type.manager'
       - '@logger.factory'
       - '@commerce_civicrm.civicrm_helper'
-    tags:
-      - { name: service }
+      - '@config.factory'
 
-  # Service for updating CiviCRM memberships based on Commerce Order data
+  # Membership lookups and cancellation.
   commerce_civicrm.membership_updater:
     class: Drupal\commerce_civicrm\Service\MembershipUpdater
     arguments:
       - '@entity_type.manager'
       - '@logger.factory'
       - '@commerce_civicrm.civicrm_helper'
-    tags:
-      - { name: service }
 
-  # Service for updating CiviCRM mailing group subscriptions
+  # Mailing group subscriptions.
   commerce_civicrm.mailing_updater:
     class: Drupal\commerce_civicrm\Service\MailingUpdater
     arguments:
       - '@entity_type.manager'
       - '@logger.factory'
       - '@commerce_civicrm.civicrm_helper'
-    tags:
-      - { name: service }
 
-  # Service for CiviCRM helper functions, initialization, and availability checks
+  # Participant cancellation for event products.
+  commerce_civicrm.participant_updater:
+    class: Drupal\commerce_civicrm\Service\ParticipantUpdater
+    arguments:
+      - '@logger.factory'
+      - '@commerce_civicrm.civicrm_helper'
+
+  # CiviCRM bootstrap, availability checks, custom-field provisioning and
+  # cached name-to-ID lookups.
   commerce_civicrm.civicrm_helper:
     class: Drupal\commerce_civicrm\Service\CivicrmHelper
     arguments:
       - '@logger.factory'
       - '@module_handler'
       - '@?civicrm'
-    tags:
-      - { name: service }
 
-  # Service for handling CiviCRM settings on Commerce product edit forms
+  # CiviCRM settings section on Commerce product edit forms.
   commerce_civicrm.product_form_helper:
     class: Drupal\commerce_civicrm\Service\ProductFormHelper
     arguments:

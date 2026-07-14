@@ -40,7 +40,13 @@ class ContactUpdater {
   }
 
   /**
-   * Updates or creates a CiviCRM contact based on Commerce Order data.
+   * Matches or creates a CiviCRM contact from Commerce Order data.
+   *
+   * Fallback used when the order's customer has no UFMatch record and
+   * contact.fallback is set to 'match_or_create': matches by email, then by
+   * the Individual.Supervised dedupe rule, then by a strict name+email
+   * lookup, and creates a new Individual from the billing profile as a last
+   * resort.
    *
    * @param \Drupal\commerce_order\Entity\OrderInterface $order
    *   The Commerce Order entity.
@@ -48,7 +54,7 @@ class ContactUpdater {
    * @return int|null
    *   The CiviCRM contact ID if successful, NULL otherwise.
    */
-  public function updateContactFromOrder(OrderInterface $order): ?int {
+  public function matchOrCreateContactFromOrder(OrderInterface $order): ?int {
     try {
       // Get the customer profile from the order
       $billing_profile = $order->getBillingProfile();
@@ -504,7 +510,7 @@ class ContactUpdater {
         ->execute();
 
       foreach ($result as $type) {
-        $options[$type['id']] = $type['label'];
+        $options[$type['name']] = $type['label'];
       }
 
       if (empty($options)) {
@@ -607,7 +613,7 @@ class ContactUpdater {
       }
 
       $result = \Civi\Api4\Group::get(FALSE)
-        ->addSelect('id', 'title')
+        ->addSelect('id', 'name', 'title')
         ->addWhere('is_active', '=', TRUE)
         ->addWhere('group_type:name', 'CONTAINS', 'Mailing List')
         ->addOrderBy('title', 'ASC')
@@ -615,7 +621,7 @@ class ContactUpdater {
         ->execute();
 
       foreach ($result as $group) {
-        $options[$group['id']] = $group['title'];
+        $options[$group['name']] = $group['title'];
       }
     } catch (\CRM_Core_Exception $e) {
       $this->logger->error('Failed to retrieve CiviCRM Mailing Groups: @error', [

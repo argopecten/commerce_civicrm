@@ -148,61 +148,16 @@ function commerce_civicrm_install() {
 }
 
 /**
- * Creates the Commerce_Order custom group and field in CiviCRM.
+ * Creates the Commerce_Order custom group and its fields in CiviCRM.
  *
  * @return bool
- *   TRUE if the custom field exists or was created, FALSE on failure.
+ *   TRUE if the custom fields exist or were created, FALSE on failure.
  */
 function _commerce_civicrm_provision_custom_fields() {
-  try {
-    if (!\Drupal::hasService('commerce_civicrm.civicrm_helper')) {
-      \Drupal::logger('commerce_civicrm')->warning('CiviCRM helper not available during install — custom fields not provisioned. They will be created on first use.');
-      return FALSE;
-    }
-
-    $helper = \Drupal::service('commerce_civicrm.civicrm_helper');
-    if (!$helper->initialize()) {
-      \Drupal::logger('commerce_civicrm')->warning('CiviCRM not available during install — custom fields not provisioned.');
-      return FALSE;
-    }
-
-    $existing = \Civi\Api4\CustomGroup::get(FALSE)
-      ->addWhere('name', '=', 'Commerce_Order')
-      ->setLimit(1)
-      ->execute();
-
-    if ($existing->count() > 0) {
-      \Drupal::logger('commerce_civicrm')->info('Commerce_Order custom group already exists — skipping creation.');
-      return TRUE;
-    }
-
-    \Civi\Api4\CustomGroup::create(FALSE)
-      ->addValue('name', 'Commerce_Order')
-      ->addValue('title', 'Commerce Order')
-      ->addValue('extends', 'Contribution')
-      ->addValue('style', 'Inline')
-      ->addValue('is_active', TRUE)
-      ->addValue('collapse_display', TRUE)
-      ->execute();
-
-    \Civi\Api4\CustomField::create(FALSE)
-      ->addValue('custom_group_id:name', 'Commerce_Order')
-      ->addValue('name', 'commerce_order_id')
-      ->addValue('label', 'Commerce Order ID')
-      ->addValue('data_type', 'Int')
-      ->addValue('html_type', 'Text')
-      ->addValue('is_searchable', TRUE)
-      ->addValue('is_active', TRUE)
-      ->addValue('is_required', FALSE)
-      ->addValue('is_view', TRUE)
-      ->execute();
-
-    \Drupal::logger('commerce_civicrm')->info('Commerce_Order custom group and field provisioned successfully.');
-    return TRUE;
-  } catch (\CRM_Core_Exception $e) {
-    \Drupal::logger('commerce_civicrm')->error('Failed to provision CiviCRM custom fields: @message', [
-      '@message' => $e->getMessage(),
-    ]);
+  if (!\Drupal::hasService('commerce_civicrm.civicrm_helper')) {
+    \Drupal::logger('commerce_civicrm')->warning('CiviCRM helper not available during install — custom fields not provisioned. They will be created on first use.');
     return FALSE;
   }
+
+  return \Drupal::service('commerce_civicrm.civicrm_helper')->ensureCommerceOrderCustomFields();
 }

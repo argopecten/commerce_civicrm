@@ -112,7 +112,7 @@ class ProductFormHelper {
       '#title' => $this->t('CiviCRM Membership Type'),
       '#description' => $this->t('Select the membership type to create when this product is purchased.'),
       '#options' => $membership_options,
-      '#default_value' => $civicrm_settings['entity_id'],
+      '#default_value' => $civicrm_settings['membership_type'],
       '#states' => [
         'visible' => [
           ':input[name="civicrm[enabled]"]' => ['checked' => TRUE],
@@ -128,7 +128,7 @@ class ProductFormHelper {
       '#title' => $this->t('CiviCRM Financial Type'),
       '#description' => $this->t('Select the financial type for contributions created when this product is purchased.'),
       '#options' => $financial_options,
-      '#default_value' => $civicrm_settings['entity_id'],
+      '#default_value' => $civicrm_settings['financial_type'],
       '#states' => [
         'visible' => [
           ':input[name="civicrm[enabled]"]' => ['checked' => TRUE],
@@ -144,7 +144,7 @@ class ProductFormHelper {
       '#title' => $this->t('CiviCRM Event'),
       '#description' => $this->t('Select the event for which to register participants when this product is purchased.'),
       '#options' => $event_options,
-      '#default_value' => $civicrm_settings['entity_id'],
+      '#default_value' => $civicrm_settings['event_id'],
       '#states' => [
         'visible' => [
           ':input[name="civicrm[enabled]"]' => ['checked' => TRUE],
@@ -176,7 +176,7 @@ class ProductFormHelper {
       '#title' => $this->t('CiviCRM Mailing Group'),
       '#description' => $this->t('Select the mailing group to add contacts to when this product is purchased.'),
       '#options' => $mailing_options,
-      '#default_value' => $civicrm_settings['entity_id'],
+      '#default_value' => $civicrm_settings['group'],
       '#states' => [
         'visible' => [
           ':input[name="civicrm[enabled]"]' => ['checked' => TRUE],
@@ -227,41 +227,34 @@ class ProductFormHelper {
 
     $civicrm_enabled = !empty($values['civicrm']['enabled']);
     $civicrm_entity = $values['civicrm']['entity'] ?? 'contribution';
-    $civicrm_entity_id = NULL;
-    $additional_settings = [];
+
+    // Save settings as a JSON string; type references are stored by name so
+    // the configuration is portable across sites with differing CiviCRM IDs.
+    $settings = [
+      'enabled' => $civicrm_enabled,
+      'entity' => $civicrm_entity,
+    ];
 
     if ($civicrm_enabled) {
       switch ($civicrm_entity) {
         case 'membership':
-          $civicrm_entity_id = $values['civicrm']['membership_type'] ?? NULL;
+          $settings['membership_type'] = $values['civicrm']['membership_type'] ?? NULL;
           break;
 
         case 'contribution':
-          $civicrm_entity_id = $values['civicrm']['contribution_type'] ?? NULL;
+          $settings['financial_type'] = $values['civicrm']['contribution_type'] ?? NULL;
           break;
 
         case 'event':
-          $civicrm_entity_id = $values['civicrm']['event_id'] ?? NULL;
-          $additional_settings['participant_role_id'] = $values['civicrm']['participant_role_id'] ?? NULL;
+          $settings['event_id'] = $values['civicrm']['event_id'] ?? NULL;
+          $settings['participant_role_id'] = $values['civicrm']['participant_role_id'] ?? NULL;
           break;
 
         case 'mailing':
-          $civicrm_entity_id = $values['civicrm']['mailing_group_id'] ?? NULL;
-          $additional_settings['mailing_preferences'] = array_filter($values['civicrm']['mailing_preferences'] ?? []);
+          $settings['group'] = $values['civicrm']['mailing_group_id'] ?? NULL;
+          $settings['mailing_preferences'] = array_filter($values['civicrm']['mailing_preferences'] ?? []);
           break;
       }
-    }
-
-    // Save settings as a JSON string for consistency.
-    $settings = [
-      'enabled' => $civicrm_enabled,
-      'entity' => $civicrm_entity,
-      'entity_id' => $civicrm_entity_id,
-    ];
-
-    // Add additional settings if any.
-    if (!empty($additional_settings)) {
-      $settings = array_merge($settings, $additional_settings);
     }
 
     $product->set('field_civicrm', json_encode($settings));
@@ -281,7 +274,12 @@ class ProductFormHelper {
     $defaults = [
       'enabled' => FALSE,
       'entity' => 'contribution',
-      'entity_id' => NULL,
+      'membership_type' => NULL,
+      'financial_type' => NULL,
+      'event_id' => NULL,
+      'participant_role_id' => NULL,
+      'group' => NULL,
+      'mailing_preferences' => [],
     ];
 
     if (!$product->hasField('field_civicrm') || $product->get('field_civicrm')->isEmpty()) {
