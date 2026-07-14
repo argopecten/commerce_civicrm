@@ -11,93 +11,111 @@
 | Installed by | `commerce_civicrm_install()` / `commerce_civicrm_add_field_to_product_type()` |
 | Auto-added to new types | Yes — via `hook_commerce_product_type_insert` |
 
-The field is hidden from default form and view displays. The module provides its own form widget via `hook_form_commerce_product_form_alter`.
+The field is hidden from default form and view displays. The module provides
+its own form widget via `hook_form_commerce_product_form_alter`.
 
 ---
 
 ## JSON schema
 
-The field stores a JSON string. Canonical schema:
+The field stores a JSON string. Type references are stored **by name** (not
+numeric ID) wherever CiviCRM has stable names — membership types, financial
+types and groups — so a shared product catalog can be imported into several
+sites whose CiviCRM databases assign different IDs. CiviCRM *events* are the
+exception: they are per-site, ad-hoc records and are referenced by ID.
+
+One JSON object per product, keyed by `entity`:
 
 ```jsonc
+// Membership product (subscription): Membership + linked Contribution.
 {
-  // Master toggle — when false, the product is ignored by the CiviCRM processor.
-  "enabled": true,               // boolean, required
+  "enabled": true,
+  "entity": "membership",
+  "membership_type": "Plusz előfizetés",   // MembershipType name (or ID)
+  "financial_type": "Plusz előfizetés"     // optional — defaults to the
+                                           // membership type's financial type
+}
 
-  // CiviCRM entity type to create.
-  "entity": "membership",        // enum: "contribution" | "membership" | "event" | "mailing"
+// Plain contribution product (book, donation, merchandise).
+{
+  "enabled": true,
+  "entity": "contribution",
+  "financial_type": "Könyv"                // FinancialType name (or ID)
+}
 
-  // Generic entity ID — interpreted based on "entity":
-  //   membership   → CiviCRM membership_type_id
-  //   contribution → CiviCRM financial_type_id
-  //   event        → CiviCRM event ID
-  //   mailing      → CiviCRM group ID
-  "entity_id": 3,                // int | null
+// Event ticket product: Participant + Event Fee contribution.
+{
+  "enabled": true,
+  "entity": "event",
+  "event_id": 3,                           // CiviCRM event ID (per-site!)
+  "participant_role_id": 1,                // participant_role option value
+  "financial_type": "Event Fee"            // optional — defaults to Event Fee
+}
 
-  // --- Normalised keys (populated by OrderCivicrmUpdater::getCivicrmProductSettings) ---
-  "membership_type_id": 3,       // int | null — set when entity = "membership"
-  "financial_type_id": null,     // int | null — set when entity = "contribution"
-
-  // --- Event-specific (written by form, not yet consumed by any service) ---
-  "participant_role_id": 1,      // int | null
-
-  // --- Mailing-specific (written by form, not yet consumed by any service) ---
-  "mailing_preferences": {       // object | array
-    "double_opt_in": "double_opt_in",
+// Mailing list opt-in product.
+{
+  "enabled": true,
+  "entity": "mailing",
+  "group": "newsletter",                   // Group name or title (or ID)
+  "mailing_preferences": {
+    "double_opt_in": "double_opt_in",      // optional flags
     "send_welcome": "send_welcome",
-    "update_existing": 0
+    "update_existing": "update_existing"
   }
+}
+
+// Bundle product whose components are expanded by a site-specific
+// OrderItemDirectivesEvent subscriber: only the toggle is set here.
+{
+  "enabled": true,
+  "entity": "membership"
 }
 ```
 
-### Defaults applied by `OrderCivicrmUpdater::getCivicrmProductSettings()`
+`{"enabled": false}` or an empty field disables processing for the product.
 
-If a key is missing, these defaults are used:
+### Defaults applied by `OrderCivicrmUpdater::getCivicrmProductSettings()`
 
 ```php
 [
-  'enabled'            => FALSE,
-  'entity'             => 'contribution',
-  'entity_id'          => NULL,
-  'membership_type_id' => NULL,
-  'financial_type_id'  => NULL,
+  'enabled'             => FALSE,
+  'entity'              => 'contribution',
+  'membership_type'     => NULL,
+  'financial_type'      => NULL,
+  'event_id'            => NULL,
+  'participant_role_id' => NULL,
+  'group'               => NULL,
+  'mailing_preferences' => [],
 ]
 ```
 
-### Backward-compatibility normalisation
-
-For configs that only have `entity` + `entity_id` (without the explicit `membership_type_id` / `financial_type_id`), the orchestrator normalises:
-
-| `entity` value | Effect |
-|---|---|
-| `membership` | `settings['membership_type_id'] = settings['entity_id']` |
-| `contribution` | `settings['financial_type_id'] = settings['entity_id']` |
+There is **no legacy `entity_id` support**: JSON written before the
+name-based schema must be re-saved (the product form writes the new shape).
 
 ---
 
 ## Form → JSON serialisation
 
-`commerce_civicrm_product_form_submit()` in `commerce_civicrm.module` reads form values and writes:
-
-```php
-$settings = [
-  'enabled'   => (bool) $values['civicrm']['enabled'],
-  'entity'    => $values['civicrm']['entity'],
-  'entity_id' => $entity_id_based_on_entity_type,
-];
-// + participant_role_id for events
-// + mailing_preferences for mailing
-$product->set('field_civicrm', json_encode($settings));
-```
+`ProductFormHelper::submitProductForm()` writes `enabled` + `entity` plus the
+entity-specific keys above. The membership-type and financial-type selects
+are keyed by CiviCRM *name*, the mailing-group select by group *name*, the
+event and participant-role selects by numeric ID/value.
 
 ---
 
 ## How the JSON is consumed
 
-1. `OrderCivicrmUpdater::processOrderItem()` loads the product, calls `getCivicrmProductSettings()`.
-2. Short-circuits if `$settings['enabled']` is falsy.
-3. If `membership_type_id` is set → `MembershipUpdater::createMembershipFromOrder()`.
-5. If both `membership_type_id` and `financial_type_id` are set → `OrderCivicrmUpdater::createLinkedMembershipContribution()` (atomic via `\Civi\Api4\Order::create`).
-6. If `financial_type_id` is set → `ContributionUpdater::createContributionFromOrderWithFinancialType()`.
-7. If entity type is `mailing` → `MailingUpdater::processMailingSubscriptionFromOrder()`.
-8. `event` entity type is stored in the JSON but **no service processes it yet**.
+1. `OrderCivicrmUpdater::buildOrderDirectives()` walks the order items,
+   parses each product's JSON and builds one default *directive* per
+   CiviCRM-enabled item.
+2. `OrderItemDirectivesEvent` lets site code replace or expand the
+   directives (bundle splitting, per-variation overrides).
+3. All financial directives of the order become **one** contribution created
+   via `\Civi\Api4\Order::create` with one line item per directive:
+   `civicrm_membership` line items (renewal-aware), `civicrm_participant`
+   line items for events, and plain lines for contribution directives.
+4. Mailing directives become `GroupContact` records outside the
+   contribution.
+
+Name references resolve through `CivicrmHelper::resolveMembershipTypeId()` /
+`resolveFinancialTypeId()` / `resolveGroupId()` with per-request caching.
