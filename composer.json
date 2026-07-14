@@ -31,7 +31,8 @@
     "php": ">=8.3",
     "drupal/core": "^11.0",
     "drupal/commerce": "^3.0",
-    "drupal/civicrm": "^6.1",
+    "civicrm/civicrm-core": "^6.1",
+    "civicrm/civicrm-drupal-8": "^6.1",
     "drupal/profile": "^1.2",
     "drupal/state_machine": "^1.5"
   },
