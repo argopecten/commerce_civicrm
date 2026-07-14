@@ -448,9 +448,9 @@ class OrderCivicrmUpdater {
         continue;
       }
       $line_items[] = $line;
-      $total = bcadd($total, $line['line_item']['line_total'], 2);
+      $total = bcadd($total, $line['line_total'], 2);
       $currency = $currency ?? $directive['currency'] ?? NULL;
-      $header_financial_type_id = $header_financial_type_id ?? $line['line_item']['financial_type_id'];
+      $header_financial_type_id = $header_financial_type_id ?? $line['financial_type_id'];
     }
 
     if ($line_items === []) {
@@ -462,15 +462,18 @@ class OrderCivicrmUpdater {
 
     $timestamp = $payment?->getCompletedTime()
       ?: ($order->getCompletedTime() ?: $this->time->getRequestTime());
+    $receive_date = DrupalDateTime::createFromTimestamp($timestamp)->format('Y-m-d H:i:s');
 
+    // The Order API always creates the contribution as Pending and computes
+    // the total from the line items; a follow-up Payment records the money
+    // and flips the contribution (and its memberships/participants) to
+    // Completed with proper financial transactions.
     $contribution_values = [
       'contact_id' => $contact_id,
       'financial_type_id' => $header_financial_type_id,
-      'total_amount' => $total,
       'currency' => $currency ?: 'EUR',
-      'receive_date' => DrupalDateTime::createFromTimestamp($timestamp)->format('Y-m-d H:i:s'),
+      'receive_date' => $receive_date,
       'source' => 'Commerce Order #' . $order->id() . ($is_renewal ? ' (Renewal)' : ''),
-      'contribution_status_id:name' => $this->isOrderPaid($order) ? 'Completed' : 'Pending',
       'Commerce_Order.commerce_order_id' => (int) $order->id(),
     ];
 
@@ -508,7 +511,25 @@ class OrderCivicrmUpdater {
       $created = $result->first();
       $contribution_id = is_array($created) ? ($created['id'] ?? $created['contribution_id'] ?? NULL) : NULL;
 
+      if ($contribution_id && $this->isOrderPaid($order)) {
+        \Civi\Api4\Payment::create(FALSE)
+          ->setValues(array_filter([
+            'contribution_id' => $contribution_id,
+            'total_amount' => $total,
+            'trxn_date' => $receive_date,
+            'trxn_id' => $payment?->getRemoteId(),
+            'payment_instrument_id' => $contribution_values['payment_instrument_id'] ?? NULL,
+          ]))
+          ->execute();
+      }
+
       $records = [];
+      if ($contribution_id) {
+        // CiviCRM's payment-completion actions renew memberships by one term,
+        // overriding explicitly supplied end dates. When dates were
+        // dispatched (site-authoritative expiry), re-assert them now.
+        $this->reassertMembershipDates($contribution_id, $line_items);
+      }
       if ($contribution_id) {
         $records['contributions'][] = (int) $contribution_id;
         foreach ($this->getContributionLineEntities((int) $contribution_id) as $line) {
@@ -538,6 +559,11 @@ class OrderCivicrmUpdater {
   /**
    * Builds one Order API line item from a directive.
    *
+   * Line items are flat LineItem arrays; values for the related entity
+   * (membership, participant) are passed as entity_id.FIELD keys, and a
+   * numeric entity_id makes the Order API update that entity instead of
+   * creating one (membership renewal).
+   *
    * @param \Drupal\commerce_order\Entity\OrderInterface $order
    *   The order.
    * @param int $contact_id
@@ -548,8 +574,7 @@ class OrderCivicrmUpdater {
    *   Whether this line belongs to a renewal contribution.
    *
    * @return array|null
-   *   The line item ['line_item' => [...], 'params' => [...]], or NULL when
-   *   the directive cannot be processed.
+   *   The line item, or NULL when the directive cannot be processed.
    */
   protected function buildLineItem(OrderInterface $order, int $contact_id, array $directive, bool $is_renewal): ?array {
     $source = 'Commerce Order #' . $order->id() . ($is_renewal ? ' (Renewal)' : '');
@@ -583,32 +608,26 @@ class OrderCivicrmUpdater {
 
         $existing_membership = $this->membershipUpdater->findExistingMembership($contact_id, $membership_type_id);
 
-        $params = [
+        $line = [
           'membership_type_id' => $membership_type_id,
-          'contact_id' => $contact_id,
-          'source' => $source,
+          'financial_type_id' => $financial_type_id,
+          'label' => $directive['label'] ?? $membership_type['name'],
+          'qty' => $qty,
+          'unit_price' => $unit_price,
+          'line_total' => $line_total,
+          'entity_id.source' => $source,
         ];
         if ($existing_membership) {
-          $params['membership_id'] = $existing_membership['id'];
+          $line['entity_id'] = (int) $existing_membership['id'];
         }
 
         foreach ($this->resolveMembershipDates($order, $directive, $membership_type, $existing_membership, $is_renewal || (bool) $existing_membership) as $key => $value) {
           if ($value !== NULL) {
-            $params[$key] = $value;
+            $line['entity_id.' . $key] = $value;
           }
         }
 
-        return [
-          'line_item' => [
-            'entity_table' => 'civicrm_membership',
-            'financial_type_id' => $financial_type_id,
-            'label' => $directive['label'] ?? $membership_type['name'],
-            'qty' => $qty,
-            'unit_price' => $unit_price,
-            'line_total' => $line_total,
-          ],
-          'params' => $params,
-        ];
+        return $line;
 
       case 'event':
         $event_id = $directive['event_id'] ?? NULL;
@@ -627,27 +646,22 @@ class OrderCivicrmUpdater {
           return NULL;
         }
 
-        $params = [
-          'event_id' => (int) $event_id,
-          'contact_id' => $contact_id,
-          'status_id:name' => 'Registered',
-          'source' => $source,
+        $line = [
+          'entity_table' => 'civicrm_participant',
+          'financial_type_id' => $financial_type_id,
+          'label' => $directive['label'] ?? ('Event #' . $event_id),
+          'qty' => $qty,
+          'unit_price' => $unit_price,
+          'line_total' => $line_total,
+          'entity_id.event_id' => (int) $event_id,
+          'entity_id.status_id:name' => 'Registered',
+          'entity_id.source' => $source,
         ];
         if (!empty($directive['participant_role_id'])) {
-          $params['role_id'] = (int) $directive['participant_role_id'];
+          $line['entity_id.role_id'] = (int) $directive['participant_role_id'];
         }
 
-        return [
-          'line_item' => [
-            'entity_table' => 'civicrm_participant',
-            'financial_type_id' => $financial_type_id,
-            'label' => $directive['label'] ?? ('Event #' . $event_id),
-            'qty' => $qty,
-            'unit_price' => $unit_price,
-            'line_total' => $line_total,
-          ],
-          'params' => $params,
-        ];
+        return $line;
 
       case 'contribution':
         $financial_type_id = $this->civicrmHelper->resolveFinancialTypeId($directive['financial_type'] ?? NULL);
@@ -659,18 +673,74 @@ class OrderCivicrmUpdater {
           return NULL;
         }
         return [
-          'line_item' => [
-            'financial_type_id' => $financial_type_id,
-            'label' => $directive['label'] ?? '',
-            'qty' => $qty,
-            'unit_price' => $unit_price,
-            'line_total' => $line_total,
-          ],
-          'params' => [],
+          'financial_type_id' => $financial_type_id,
+          'label' => $directive['label'] ?? '',
+          'qty' => $qty,
+          'unit_price' => $unit_price,
+          'line_total' => $line_total,
         ];
     }
 
     return NULL;
+  }
+
+  /**
+   * Re-asserts dispatched membership dates after payment completion.
+   *
+   * @param int $contribution_id
+   *   The created contribution.
+   * @param array $line_items
+   *   The line items sent to the Order API; membership lines carry the
+   *   dispatched dates as entity_id.* keys.
+   */
+  protected function reassertMembershipDates(int $contribution_id, array $line_items): void {
+    $dates_by_type = [];
+    foreach ($line_items as $line) {
+      if (empty($line['membership_type_id'])) {
+        continue;
+      }
+      $dates = array_filter([
+        'join_date' => $line['entity_id.join_date'] ?? NULL,
+        'start_date' => $line['entity_id.start_date'] ?? NULL,
+        'end_date' => $line['entity_id.end_date'] ?? NULL,
+      ]);
+      if (isset($dates['end_date'])) {
+        $dates_by_type[(int) $line['membership_type_id']] = $dates;
+      }
+    }
+    if ($dates_by_type === []) {
+      return;
+    }
+
+    try {
+      foreach ($this->getContributionLineEntities($contribution_id) as $line) {
+        if ($line['entity_table'] !== 'civicrm_membership') {
+          continue;
+        }
+        $membership = \Civi\Api4\Membership::get(FALSE)
+          ->addSelect('membership_type_id', 'end_date')
+          ->addWhere('id', '=', $line['entity_id'])
+          ->execute()->first();
+        $dates = $membership ? ($dates_by_type[(int) $membership['membership_type_id']] ?? NULL) : NULL;
+        if (!$dates || ($membership['end_date'] ?? NULL) === $dates['end_date']) {
+          continue;
+        }
+        \Civi\Api4\Membership::update(FALSE)
+          ->addWhere('id', '=', $line['entity_id'])
+          ->setValues($dates)
+          ->execute();
+        $this->logger->info('Re-asserted dispatched dates on membership @id (end_date @end)', [
+          '@id' => $line['entity_id'],
+          '@end' => $dates['end_date'],
+        ]);
+      }
+    }
+    catch (\CRM_Core_Exception $e) {
+      $this->logger->error('Error re-asserting membership dates on contribution @cid: @error', [
+        '@cid' => $contribution_id,
+        '@error' => $e->getMessage(),
+      ]);
+    }
   }
 
   /**
