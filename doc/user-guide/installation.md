@@ -2,10 +2,12 @@
 
 ## Overview
 
-The Commerce CiviCRM module integrates Drupal Commerce with CiviCRM, enabling
-automatic CiviCRM record creation when customers complete orders. Products are
-configured through a built-in UI that stores CiviCRM settings as JSON in a
-single `field_civicrm` field.
+The Commerce CiviCRM module integrates Drupal Commerce with CiviCRM: when an
+order passes a configured workflow transition, CiviCRM records
+(contributions, memberships, event participants, mailing subscriptions) are
+created from the products' CiviCRM configuration. Products are configured
+through a built-in UI that stores settings as JSON in a single
+`field_civicrm` field.
 
 ## Requirements
 
@@ -14,12 +16,14 @@ single `field_civicrm` field.
 | **PHP** | >= 8.3 |
 | **Drupal core** | ^11.0 |
 | **Drupal Commerce** | ^3.0 |
-| **CiviCRM** | ^6.1 (tested with 6.1.0–6.2.0) |
+| **CiviCRM** (`civicrm/civicrm-core` + `civicrm/civicrm-drupal-8`) | ^6.16 |
 | **Profile** | ^1.2 |
 | **State Machine** | ^1.5 |
 
 The module also depends on `commerce_product`, `commerce_order`,
 `commerce_payment`, and `user` (declared in `commerce_civicrm.info.yml`).
+CiviCRM 6.16 is a hard floor: the module uses the current CiviCRM Order and
+Payment API behaviour.
 
 ## Installation
 
@@ -34,43 +38,58 @@ drush en commerce_civicrm
 
 On installation the module automatically:
 
-1. **Adds `field_civicrm`** (a `text_long` JSON field) to all existing Commerce
-   product types. The field is hidden from form and view displays — configuration
-   happens through the dedicated CiviCRM UI section on product edit forms.
-2. **Provisions CiviCRM custom fields** — creates a `Commerce_Order` custom group
-   on the `Contribution` entity with a `commerce_order_id` integer field, used for
-   order-to-contribution cross-referencing.
-3. **Registers event subscribers** for Commerce order workflow transitions
-   (`place`, `validate`, `fulfill`, `cancel`).
+1. **Adds `field_civicrm`** (a `text_long` JSON field) to all existing
+   Commerce product types. The field is hidden from form and view displays —
+   configuration happens through the dedicated *CiviCRM Integration* section
+   on product edit forms. New product types receive the field automatically.
+2. **Provisions CiviCRM custom fields** — creates a `Commerce_Order` custom
+   group on the Contribution entity with `commerce_order_id` and
+   `commerce_payment_id` integer fields, used to link contributions to
+   Commerce orders/payments and to keep processing idempotent.
+3. **Installs default settings** (`commerce_civicrm.settings`): process
+   orders on the `place` transition, cancel on `cancel`.
+4. **Installs the "My CiviCRM Orders" view**
+   (`commerce_civicrm_my_orders`).
 
-New product types created after installation automatically receive the
-`field_civicrm` field via `hook_commerce_product_type_insert()`.
+### Step 3 — Configure Transitions (if needed)
 
-### Step 3 — Verify
+If your order workflow doesn't use the stock `place` / `cancel` transitions
+(custom workflows, paid/completed flows), set the transition IDs that should
+trigger processing — see [Configuration](configuration.md).
 
-1. **Check status page** (`/admin/reports/status`) — the module reports CiviCRM
-   availability and maintenance mode status.
-2. **Edit any product** — a "CiviCRM Integration" section should appear in the
-   Advanced sidebar.
-3. **Review logs** at `/admin/reports/dblog` (filter by `commerce_civicrm`).
+### Step 4 — Verify
 
-## Post-Install Configuration
+1. **Check the status page** (`/admin/reports/status`) — the module reports
+   CiviCRM availability.
+2. **Edit any product** — a "CiviCRM Integration" section should appear in
+   the Advanced sidebar.
+3. **Review logs** on the `commerce_civicrm` channel.
 
-### Verify CiviCRM Connection
+## Post-Install Notes
 
-The module checks CiviCRM availability at runtime via `CivicrmHelper::isAvailable()`.
-If CiviCRM is in maintenance mode (upgrade active or environment set to
-`Maintenance`), the module logs a warning and skips processing — orders still
-complete normally in Commerce.
+### CiviCRM availability
+
+The module checks CiviCRM availability at runtime. If CiviCRM is unavailable
+or in maintenance mode (upgrade active, or environment set to
+`Maintenance`), the module logs the problem and skips processing — **orders
+always complete normally in Commerce**. Skipped orders can be replayed later:
+
+```bash
+drush commerce-civicrm:process-order 128,129
+```
+
+(Idempotent: orders that already have a linked contribution are skipped.)
 
 ### Permissions
 
 The module uses existing Commerce and CiviCRM permissions:
 
 - **Commerce order processing** — standard Commerce roles
-- **Product configuration** — users who can edit products see the CiviCRM settings
-- **CiviCRM API access** — the module uses `checkPermissions(FALSE)` on all API4
-  calls, so no additional CiviCRM permissions are needed for the integration itself
+- **Product configuration** — users who can edit products see the CiviCRM
+  settings
+- **CiviCRM API access** — the module passes `checkPermissions = FALSE` on
+  all API4 calls, so no additional CiviCRM permissions are needed for the
+  integration itself
 
 ## Uninstallation
 
@@ -85,8 +104,11 @@ On uninstall the module:
 3. Removes module configuration and the `commerce_civicrm_my_orders` view
 4. Clears relevant caches
 
+CiviCRM records created by the module (contacts, contributions, memberships,
+participants, group memberships) are left in place.
+
 ## Next Steps
 
+- [Configuration](configuration.md) — transitions, contact fallback, payment instruments, membership dates
 - [Product Configuration](product-configuration.md) — configure CiviCRM settings on products
 - [Order Processing](order-processing.md) — understand the automatic processing workflow
-- [Services Overview](../services/overview.md) — technical service architecture

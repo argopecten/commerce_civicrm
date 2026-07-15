@@ -89,8 +89,8 @@ One JSON object per product, keyed by `entity`:
 ]
 ```
 
-There is **no legacy `entity_id` support**: JSON written before the
-name-based schema must be re-saved (the product form writes the new shape).
+Keys outside this schema are preserved in the decoded array but ignored by
+the module — subscribers may use them as private extension data.
 
 ---
 

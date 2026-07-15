@@ -1,170 +1,174 @@
 # Commerce CiviCRM Integration
 
-This documentation provides comprehensive information about the Commerce CiviCRM Integration Module, a Commerce-style direct integration system for Drupal Commerce and CiviCRM.
+This documentation covers the Commerce CiviCRM module: a direct, event-driven
+integration between Drupal Commerce and CiviCRM. When an order passes a
+configured workflow transition, the module creates CiviCRM records —
+contributions, memberships, event participants and mailing-group
+subscriptions — from the products' CiviCRM configuration.
 
 ## Overview
 
-The Commerce CiviCRM module uses **direct Commerce-style integration** instead of Rules. When an order is placed, the system automatically creates CiviCRM records based on product field configurations.
+The module listens to Commerce order **workflow transitions** (which
+transitions trigger processing is configuration, not code) and converts each
+order into **one CiviCRM contribution** created through the CiviCRM
+**Order API** (`\Civi\Api4\Order`), with one line item per CiviCRM-enabled
+order item: membership line items (created or renewed), participant line
+items for event products, and plain contribution lines. Mailing-list products
+become `GroupContact` records outside the contribution. Recurring charges on
+the same order can be recorded as renewal contributions.
+
+Processing is **idempotent per order** (and per payment for renewals) via a
+`Commerce_Order` custom field group on the contribution, so replays are safe.
 
 ## Quick Start
 
-1. **Install the module**: `drush en commerce_civicrm`
-2. **Clear cache**: `drush cr`
-3. **Add CiviCRM fields** to your product types (membership type, financial type)
-4. **Configure products** with CiviCRM field values
-5. **Place test orders** to verify automatic CiviCRM record creation
-6. **Monitor logs** and verify CiviCRM records
+1. **Install the module**: `drush en commerce_civicrm && drush cr`
+   (`field_civicrm` is added to all product types automatically).
+2. **Configure transitions** in `commerce_civicrm.settings` if your order
+   workflow doesn't use the default `place` / `cancel` transitions — see
+   [Configuration](user-guide/configuration.md).
+3. **Configure products**: edit a product and use the *CiviCRM Integration*
+   section to pick the record type (contribution, membership, event
+   registration or mailing subscription).
+4. **Place a test order** and verify the CiviCRM records.
+5. **Monitor logs** on the `commerce_civicrm` channel.
 
 ## Architecture Overview
 
-The module follows a **Commerce-native architecture** with direct service integration:
+### Event flow
 
-### Event Flow
-1. **Commerce Order Events** - Workflow transitions like `order.place`
-2. **OrderCompleteSubscriber** - Catches Commerce `WorkflowTransitionEvent` directly
-3. **OrderCivicrmUpdater** - Processes order items and product configurations
-4. **CiviCRM Services** - Create appropriate CiviCRM records automatically
+1. **Commerce order transition** — state_machine dispatches
+   `commerce_order.post_transition` for every order workflow transition.
+2. **OrderCompleteSubscriber** — matches the transition ID against the
+   configured `order.create_transitions` / `order.cancel_transitions` lists
+   (optionally filtered by an `order.workflows` allowlist).
+3. **OrderCivicrmUpdater** — resolves the CiviCRM contact, builds one
+   *directive* per CiviCRM-enabled order item (site code can alter or expand
+   them via `OrderItemDirectivesEvent`), and creates one contribution with
+   line items via the CiviCRM Order API, followed by a Payment when the order
+   is paid.
+4. **Support services** — contact resolution, contribution/membership/
+   participant lookups and cancellation, mailing-group subscriptions.
+5. **Dispatched events** — six module events let site code customise every
+   step and react to results. See
+   [Hooks & Events](development/hooks-and-events.md).
 
-### Core Components
-- **Event Subscriber** - Listens to Commerce workflow transition events
-- **Order Processor** - Main service that coordinates CiviCRM record creation
-- **CiviCRM Services** - Handle all CiviCRM API operations
-- **Product Fields** - Configure CiviCRM behavior through product field settings
+### Core components
+
+| Component | Role |
+|---|---|
+| `OrderCompleteSubscriber` | Routes configured workflow transitions to processing |
+| `OrderCivicrmUpdater` | Orchestrator: directives → one contribution per order (Order API) |
+| `RenewalProcessor` | Records recurring/renewal payments on already-processed orders |
+| `ContactUpdater` | UFMatch lookup, match-or-create fallback, option lists |
+| `ContributionUpdater` | Contribution lookups (idempotency), payment instrument mapping, cancellation |
+| `MembershipUpdater` | Membership lookups and cancellation |
+| `ParticipantUpdater` | Participant cancellation |
+| `MailingUpdater` | Mailing group subscriptions (GroupContact) |
+| `CivicrmHelper` | CiviCRM bootstrap, availability/maintenance checks, custom-field provisioning, name→ID resolution |
+| `ProductFormHelper` | *CiviCRM Integration* section on product edit forms |
 
 ## Product Configuration
 
-To enable automatic CiviCRM integration, add the `field_civicrm` field to your Commerce Product types. The module can provision this field automatically via `hook_commerce_product_type_insert()`, or you can add it manually.
+Products are configured through the *CiviCRM Integration* section of the
+product edit form; the settings are stored as JSON in a hidden `field_civicrm`
+field (type `text_long`, auto-provisioned on every product type).
 
-### field_civicrm
-- **Type**: `text_long` (plain text)
-- **Storage**: JSON blob containing CiviCRM settings
-- **Key properties**:
-  - `membership_type_id` — CiviCRM membership type ID
-  - `financial_type_id` — CiviCRM financial type ID
-  - `is_membership` — Whether this product creates a membership
+Key JSON properties (type references are stored **by name** so shared
+catalogs work across sites):
 
-See [Product Field Schema](development/product-field-schema.md) for the full JSON schema and defaults.
+- `enabled` — whether purchasing the product creates CiviCRM records
+- `entity` — `contribution` | `membership` | `event` | `mailing`
+- `membership_type` / `financial_type` — CiviCRM type name (or numeric ID)
+- `event_id`, `participant_role_id` — for event products (IDs, per-site)
+- `group`, `mailing_preferences` — for mailing products
 
-## Testing the Integration
+See [Product Field Schema](development/product-field-schema.md) for the full
+schema and defaults.
 
-### 1. Enable Module
+## Module Settings
+
+`commerce_civicrm.settings` (config object, no admin UI — manage via
+`drush config:set` or config sync):
+
+| Key | Default | Purpose |
+|---|---|---|
+| `order.create_transitions` | `[place]` | Transition IDs that create CiviCRM records |
+| `order.cancel_transitions` | `[cancel]` | Transition IDs that cancel them |
+| `order.workflows` | `[]` | Optional workflow-ID allowlist (empty = all) |
+| `contact.fallback` | `none` | `match_or_create` enables billing-profile contact matching/creation when the customer has no UFMatch |
+| `contribution.payment_instrument_map` | `{manual: Cash, paypal: PayPal}` | Gateway → payment instrument name |
+| `contribution.payment_instrument_default` | `Credit Card` | Fallback instrument |
+| `membership.date_mode` | `civicrm` | `dispatch` fires `MembershipDatesEvent` so site code supplies membership dates |
+
+See [Configuration](user-guide/configuration.md) for details.
+
+## Verifying the Integration
+
 ```bash
-drush en commerce_civicrm
-drush cr
-```
-
-### 2. Check Services are Registered
-```bash
+drush en commerce_civicrm && drush cr
+# All 10 services should be registered:
 drush devel:services | grep commerce_civicrm
+# Replay an order into CiviCRM (idempotent — safe on processed orders):
+drush commerce-civicrm:process-order 128
 ```
 
-Should show:
-- `commerce_civicrm.order_civicrm_updater`
-- `commerce_civicrm.order_complete_subscriber`
+Then place a test order and check:
 
-### 3. Create Test Product
-1. Create a Commerce Product type (the `field_civicrm` field is added automatically)
-2. Create a product and configure its `field_civicrm` JSON values
-3. Set appropriate CiviCRM IDs (`membership_type_id`, `financial_type_id`)
+- New/updated contact record (via UFMatch, or billing-profile fallback)
+- One contribution linked to the order (`Commerce_Order.commerce_order_id`)
+- Membership / participant records created through the contribution's line
+  items (for membership / event products)
+- Mailing group membership (for mailing products)
 
-### 4. Place Test Order
-1. Add product to cart
-2. Complete checkout process
-3. Check logs for integration activity:
-
-```bash
-drush ws --tail --filter="commerce_civicrm"
-```
-
-### 5. Verify CiviCRM Records
-Check your CiviCRM instance for:
-- New/updated contact record
-- Membership record (if product has `membership_type_id`)
-- Contribution record (if product has `financial_type_id`)
-
-See [Testing](development/testing.md) for the full manual test checklist.
-
-## Integration Features
-
-The module supports flexible product-based configuration:
-
-- **🎯 Automatic Processing** - CiviCRM records created automatically based on product fields
-- **📦 Product Configuration** - Configure behavior through standard Drupal fields
-- **🔍 Monitoring** - Comprehensive logging and debugging capabilities
-- **⚡ High Performance** - Direct service integration without Rules overhead
+See [Testing](development/testing.md) for the unit tests and the full manual
+checklist.
 
 ## Log Messages
 
-The integration provides detailed logging. Look for these messages:
+All services log to the `commerce_civicrm` channel. Typical messages:
 
-### Success Messages
-- `Processing order @order_id for CiviCRM integration`
-- `Processing order item @item_id for product @product_id`
-- `Created membership @membership_id for order item @item_id`
-- `Created contribution @contribution_id for order item @item_id`
-
-### Warning Messages
-- `Order @order_id has no customer`
-- `Could not find or create CiviCRM contact for user @uid`
+- `Processing order @order_id transition @transition (@from → @to, workflow @workflow) for CiviCRM record creation`
+- `Completed processing order @order_id. Created records: {"contributions":[…],"memberships":[…]}`
+- `Contribution already exists for order @order_id: @contribution_id - skipping`
+- `Order @order_id has no CiviCRM-enabled items - nothing to do`
+- `Could not resolve a CiviCRM contact for order @order_id (customer @uid, fallback: @fallback)`
 - `CiviCRM is not available - skipping order @order_id processing`
-
-## Troubleshooting
-
-### No CiviCRM Records Created
-1. Check CiviCRM is properly initialized
-2. Verify product has required fields
-3. Check user has valid email/contact info
-4. Review logs for error messages
-
-### Service Not Found Errors
-1. Clear Drupal cache: `drush cr`
-2. Check `commerce_civicrm.services.yml` syntax
-3. Verify all service dependencies exist
-
-### Event Not Firing
-1. Confirm Commerce workflow transitions are working
-2. Check event subscriber registration in services.yml
-3. Verify order state changes trigger events
 
 ## Customization
 
-### Extending the Module
-- **Decorate services** — Override `OrderCivicrmUpdater`, `ContactUpdater`, etc. via Drupal's service decoration
-- **Event subscribers** — Subscribe to Commerce `WorkflowTransitionEvent` for custom logic
-- **hook_form_alter** — Customise the `field_civicrm` widget on product edit forms
-- **Extend `field_civicrm` JSON** — Add new keys to the JSON schema for additional CiviCRM record types
+- **Module events** — subscribe to `OrderItemDirectivesEvent`,
+  `MembershipDatesEvent`, `ContributionParamsEvent`, `OrderProcessedEvent`,
+  `RenewalRecordedEvent` to alter directives, dates, API parameters, or react
+  to results. This is the primary extension mechanism.
+- **Renewal API** — call
+  `commerce_civicrm.renewal_processor::recordRenewalPayment()` from site code
+  (e.g. a payment-insert subscriber) to record recurring charges.
+- **Service decoration** — override any module service via Drupal's service
+  decoration.
+- **hook_form_alter** — extend the *CiviCRM Integration* product form section.
 
-See [Developer Guide](development/developer-guide.md) and [Hooks & Events](development/hooks-and-events.md) for details.
-
-## Benefits of Direct Integration
-
-Compared to the previous Rules-based approach:
-
-✅ **Reliable**: No dependency on Rules service availability  
-✅ **Performance**: Direct service calls, no event dispatch overhead  
-✅ **Maintainable**: Clear code flow, easier debugging  
-✅ **Flexible**: Easy to customize and extend  
-✅ **Commerce-Style**: Follows Commerce core module patterns  
+See [Developer Guide](development/developer-guide.md) and
+[Hooks & Events](development/hooks-and-events.md).
 
 ## Documentation Structure
 
 ### User Guide
-- **[Installation & Configuration](user-guide/installation.md)** - Setup and basic configuration
-- **[Product Configuration](user-guide/product-configuration.md)** - Setting up CiviCRM fields on products
-- **[Order Processing](user-guide/order-processing.md)** - How automatic processing works
-- **[Troubleshooting](user-guide/troubleshooting.md)** - Common issues and solutions
+
+- **[Installation](user-guide/installation.md)** — requirements, setup, what gets installed
+- **[Configuration](user-guide/configuration.md)** — the `commerce_civicrm.settings` reference
+- **[Product Configuration](user-guide/product-configuration.md)** — setting up CiviCRM behaviour on products
+- **[Order Processing](user-guide/order-processing.md)** — how orders become CiviCRM records
+- **[Troubleshooting](user-guide/troubleshooting.md)** — common issues and solutions
 
 ### Development
-- **[Developer Guide](development/developer-guide.md)** - Architecture overview, extension points, and documentation index
-- **[Architecture](development/architecture.md)** - Module structure, service graph, and data flow
-- **[Services](development/services.md)** - Detailed service reference with public API
-- **[API Reference](development/api-reference.md)** - CiviCRM API4 patterns used in the module
-- **[Hooks & Events](development/hooks-and-events.md)** - Drupal hooks, event subscribers, and extension points
-- **[Product Field Schema](development/product-field-schema.md)** - `field_civicrm` JSON schema and product configuration
-- **[Field Automation](development/field-automation.md)** - Automatic `field_civicrm` provisioning to product types
-- **[Testing](development/testing.md)** - Testing strategy and manual test procedures
-- **[TODO / Backlog](development/todo.md)** - Open issues and development backlog
 
-## Support
-
-For detailed information on specific topics, navigate to the appropriate documentation section above.
+- **[Developer Guide](development/developer-guide.md)** — overview, extension points, documentation index
+- **[Architecture](development/architecture.md)** — module structure, service graph, data flow
+- **[Services](development/services.md)** — service reference with public API
+- **[API Reference](development/api-reference.md)** — CiviCRM API4 patterns used in the module
+- **[Hooks & Events](development/hooks-and-events.md)** — Drupal hooks, dispatched events, extension points
+- **[Product Field Schema](development/product-field-schema.md)** — `field_civicrm` JSON schema
+- **[Field Automation](development/field-automation.md)** — automatic `field_civicrm` provisioning
+- **[Testing](development/testing.md)** — unit tests and manual test procedures
+- **[TODO / Backlog](development/todo.md)** — open issues and development backlog

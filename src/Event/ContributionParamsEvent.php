@@ -22,7 +22,9 @@ class ContributionParamsEvent extends Event {
    * @param array $contributionValues
    *   The contribution values for Order::create()->setContributionValues().
    * @param array $lineItems
-   *   The line items, each ['line_item' => [...], 'params' => [...]].
+   *   The line items: flat LineItem arrays as passed to
+   *   Order::create()->addLineItem(), with related-entity values as
+   *   entity_id.FIELD keys.
    * @param \Drupal\commerce_payment\Entity\PaymentInterface|null $payment
    *   The Commerce payment this contribution reflects, if any.
    * @param array $context
