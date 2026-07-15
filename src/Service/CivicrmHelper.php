@@ -194,17 +194,18 @@ class CivicrmHelper {
           ->execute();
       }
 
-      $fields = \Civi\Api4\CustomField::get(FALSE)
-        ->addSelect('name')
+      $field_ids = \Civi\Api4\CustomField::get(FALSE)
+        ->addSelect('id', 'name')
         ->addWhere('custom_group_id:name', '=', 'Commerce_Order')
         ->execute()
-        ->column('name');
+        ->indexBy('name')
+        ->column('id');
 
       foreach (['commerce_order_id' => 'Commerce Order ID', 'commerce_payment_id' => 'Commerce Payment ID'] as $name => $label) {
-        if (in_array($name, $fields, TRUE)) {
+        if (isset($field_ids[$name])) {
           continue;
         }
-        \Civi\Api4\CustomField::create(FALSE)
+        $created = \Civi\Api4\CustomField::create(FALSE)
           ->addValue('custom_group_id:name', 'Commerce_Order')
           ->addValue('name', $name)
           ->addValue('label', $label)
@@ -214,9 +215,13 @@ class CivicrmHelper {
           ->addValue('is_active', TRUE)
           ->addValue('is_required', FALSE)
           ->addValue('is_view', TRUE)
-          ->execute();
+          ->execute()
+          ->first();
+        $field_ids[$name] = $created['id'];
         $this->logger->info('Provisioned Commerce_Order.@field custom field.', ['@field' => $name]);
       }
+
+      $this->syncDrupalFieldDefinitions($field_ids);
 
       return TRUE;
     }
@@ -226,6 +231,68 @@ class CivicrmHelper {
       ]);
       return FALSE;
     }
+  }
+
+  /**
+   * Records the Commerce_Order custom fields as installed Drupal field definitions.
+   *
+   * When civicrm_entity is enabled, it exposes every CiviCRM custom field as
+   * a base field (custom_N) on the matching entity type. Creating the fields
+   * through the CiviCRM API alone leaves those definitions unregistered on
+   * the Drupal side, producing a permanent "Mismatched entity and/or field
+   * definitions" warning on the status report.
+   *
+   * The definitions are written directly to the last-installed-schema
+   * repository — the same thing core does for all base fields when an entity
+   * type is first installed, and consistent with civicrm_entity's storage
+   * schema handler, which reports that field storage never requires schema
+   * changes. EntityDefinitionUpdateManager::installFieldStorageDefinition()
+   * must NOT be used here: it notifies the field storage definition listener,
+   * whose schema handler would qualify these single-value base fields for
+   * shared table storage and ALTER CiviCRM's own civicrm_contribution table,
+   * even though the data lives in CiviCRM's custom value table.
+   *
+   * @param array $field_ids
+   *   CiviCRM custom field IDs of the Commerce_Order group, keyed by name.
+   */
+  protected function syncDrupalFieldDefinitions(array $field_ids): void {
+    if (!$this->moduleHandler->moduleExists('civicrm_entity')) {
+      return;
+    }
+    if (!\Drupal::entityTypeManager()->hasDefinition('civicrm_contribution')) {
+      // The Contribution entity type is not enabled in civicrm_entity.
+      return;
+    }
+
+    /** @var \Drupal\Core\Entity\EntityLastInstalledSchemaRepositoryInterface $repository */
+    $repository = \Drupal::service('entity.last_installed_schema.repository');
+    if (!$repository->getLastInstalledDefinition('civicrm_contribution')) {
+      // The entity type itself is not installed yet; once it is, all of its
+      // base field definitions get recorded in one go.
+      return;
+    }
+
+    $installed = $repository->getLastInstalledFieldStorageDefinitions('civicrm_contribution');
+    $missing = array_filter(
+      array_map(static fn ($id) => 'custom_' . $id, $field_ids),
+      static fn ($name) => !isset($installed[$name])
+    );
+    if (!$missing) {
+      return;
+    }
+
+    /** @var \Drupal\Core\Entity\EntityFieldManagerInterface $field_manager */
+    $field_manager = \Drupal::service('entity_field.manager');
+    // Rebuild the definitions so freshly created custom fields are included.
+    $field_manager->clearCachedFieldDefinitions();
+    $definitions = $field_manager->getFieldStorageDefinitions('civicrm_contribution');
+    foreach ($missing as $name) {
+      if (isset($definitions[$name])) {
+        $repository->setLastInstalledFieldStorageDefinition($definitions[$name]);
+        $this->logger->info('Registered @field on civicrm_contribution as an installed field definition.', ['@field' => $name]);
+      }
+    }
+    $field_manager->clearCachedFieldDefinitions();
   }
 
   /**
